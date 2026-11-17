@@ -19,3 +19,8 @@ add wave -radix unsigned /order_book_tb/q_side /order_book_tb/q_level /order_boo
 run -all
 # skip the 20 us RAM clear and zoom on the messages
 wave zoom range 20400ns 22200ns
+
+# Show FSM states by name (added after the run so a problem here never stops the sim)
+virtual type {CLEAR IDLE ADD_TBL TBL_RD TBL_CHK LVL_RD LVL_UPD DONE} book_state_t
+virtual function {(book_state_t)/order_book_tb/dut/state} book_state
+add wave -position 7 /order_book_tb/book_state

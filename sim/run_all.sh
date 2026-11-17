@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs all of Pierce's tests with Icarus Verilog (brew install icarus-verilog).
+# Runs the trading-side tests with Icarus Verilog (brew install icarus-verilog).
 # Same testbenches as the ModelSim .do scripts. Exits non-zero on any failure.
 set -e
 cd "$(dirname "$0")"

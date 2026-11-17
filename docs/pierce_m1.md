@@ -24,7 +24,7 @@ live book and our quotes on VGA and risk status on the LEDs.
 Locally (Icarus Verilog), everything in one go:
 
 ```
-sim/run_pierce.sh
+sim/run_all.sh
 ```
 
 In ModelSim, from `sim/`: `do run_strategy.do`, `do run_risk_gate.do`, `do run_hft_top.do`,

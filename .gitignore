@@ -1,0 +1,8 @@
+# simulation output
+sim/out/
+sim/work/
+sim/transcript
+sim/sim_out*.txt
+*.vcd
+*.wlf
+__pycache__/

@@ -70,6 +70,6 @@ module milestone1_top_tb;
         SW[9] = 1;
         repeat (60 * 50) @(posedge CLOCK_50);
         show("auto 60 msgs");
-        $finish;
+        $stop;
     end
 endmodule

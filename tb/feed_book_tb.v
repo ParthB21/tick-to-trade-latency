@@ -81,11 +81,11 @@ module feed_book_tb;
             $display("throughput: %0d ns for %0d messages = %0d cycles per message",
                      t_last - t_first, n - 1, (t_last - t_first) / 20 / (n - 1));
         $display("results written to %0s", OUT_FILE);
-        $finish;
+        $stop;
     end
 
     initial begin
         #5_000_000;                            // safety timeout
-        $display("TIMEOUT"); $finish;
+        $display("TIMEOUT"); $stop;
     end
 endmodule

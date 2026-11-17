@@ -22,8 +22,8 @@ wave zoom range 20400ns 22000ns
 
 # Show FSM states by name (added after the run so a problem here never stops the sim)
 virtual type {IDLE READ LATCH SEND WAIT FINISHED} feed_state_t
-virtual function {(feed_state_t)/feed_book_tb/feed_state} feed_state_name
+virtual function -install /feed_book_tb {(feed_state_t)/feed_book_tb/feed_state} feed_state_name
 virtual type {CLEAR IDLE ADD_TBL TBL_RD TBL_CHK LVL_RD LVL_UPD DONE} book_state_t
-virtual function {(book_state_t)/feed_book_tb/book_state} book_state_name
+virtual function -install /feed_book_tb {(book_state_t)/feed_book_tb/book_state} book_state_name
 add wave -position 5 /feed_book_tb/feed_state_name
 add wave /feed_book_tb/book_state_name

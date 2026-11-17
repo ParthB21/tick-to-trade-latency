@@ -134,6 +134,6 @@ module order_book_tb;
 
         $display("----------------------------------------");
         $display("%0d checks passed, %0d failed  =>  %0s", pass, fail, fail ? "FAIL" : "ALL PASS");
-        $finish;
+        $stop;
     end
 endmodule

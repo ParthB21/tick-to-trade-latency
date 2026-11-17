@@ -6,6 +6,8 @@
 //   level qty    lvl[128]    : total qty at {side, price}                  (RAM)
 //   level view   lvl_view[128]: identical copy of lvl, read by the dashboard /
 //                               board display through the query port      (RAM)
+//   level view 2 lvl_view2[128]: a second identical copy, read through query
+//                               port 2 (HEX depth display in hft_top)    (RAM)
 //   bid_mask, ask_mask       : bit p = 1 if that price level has any qty   (registers)
 //   best bid / best ask      : priority encoders on the masks              (combinational)
 //
@@ -53,6 +55,11 @@ module order_book (
     input             q_side,
     input      [5:0]  q_level,
     output reg [12:0] q_qty,
+
+    // Query port 2: same as above, for a second reader (e.g. HEX while VGA uses port 1)
+    input             q2_side,
+    input      [5:0]  q2_level,
+    output reg [12:0] q2_qty,
 
     output     [2:0]  state_out
 );
@@ -126,6 +133,12 @@ module order_book (
     always @(posedge clk) begin
         if (lvl_we) lvl_view[lvl_waddr] <= lvl_wdata;
         q_qty <= lvl_view[{q_side, q_level}];
+    end
+
+    reg [12:0] lvl_view2 [0:127];
+    always @(posedge clk) begin
+        if (lvl_we) lvl_view2[lvl_waddr] <= lvl_wdata;
+        q2_qty <= lvl_view2[{q2_side, q2_level}];
     end
 
     // new level quantity (saturating add, floor-at-zero subtract)

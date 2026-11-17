@@ -3,24 +3,33 @@
 // with the live book and our quotes on VGA (dashboard) and risk status on the LEDs.
 //
 // vga_adapter is the course-provided VGA core (vga_adapter.v, vga_controller.v,
-// vga_address_translator.v, vga_pll.v + black.mif), used unmodified.
+// vga_address_translator.v, vga_pll.v), used unmodified, with a black 320x240
+// 3-bit background (black_320x240_3.mif).
 //
 // Controls
 //   KEY[0]   reset
 //   KEY[1]   step: one market message per press (when SW[1:0] = 00)
+//   KEY[2]   HEX view: bot -> market -> bid depth -> ask depth -> bot ...
+//   KEY[3]   data set: 1000-message market <-> 13-message hand-checkable test
+//            (switching restarts everything, like KEY[0]; starts on the market data)
 //   SW[1:0]  replay: 00 step with KEY[1], 01 auto 4 msgs/s, 1x full speed
 //   SW[4:3]  quote size per side: 1 / 2 / 4 / 8
 //   SW[6:5]  half-spread: 0..3 ticks either side of the mid
 //   SW[8:7]  max |position|: 4 / 8 / 16 / 32
 //   SW[9]    kill switch (latches until reset)
-// Displays
-//   HEX5-4 our bid price, HEX3-2 our ask price ("--" = that side not live)
+// Displays (KEY[2] cycles; starts in bot view, and the view is kept across reset)
+//   bot view      : HEX5-4 our bid price, HEX3-2 our ask price ("--" = side not live), HEX1-0 blank
+//   market view   : HEX5-4 market best bid, HEX3-2 market best ask ("--" = side empty),
+//                   HEX1-0 messages processed (last 2 digits)
+//   bid depth view: HEX5-4 best bid price, HEX3-0 total shares at the best bid
+//   ask depth view: HEX5-4 best ask price, HEX3-0 total shares at the best ask
 //   LEDR[9] killed   LEDR[8] feed finished   LEDR[7] ask live   LEDR[6] bid live
 //   LEDR[5:0] sticky reject flags: 5 cross, 4 short limit, 3 long limit,
 //             2 size, 1 quote not ok (book one-sided), 0 kill
 module hft_top #(
     parameter AUTO_DIV   = 12_500_000,               // 0.25 s at 50 MHz
     parameter MARKET_HEX = "../mem/market_data.hex", // relative to the Quartus project folder
+    parameter SMALL_HEX  = "../mem/test_small.hex",  // 13-message hand-checkable test
     parameter MAX_SIZE   = 8
 ) (
     input        CLOCK_50,
@@ -40,7 +49,26 @@ module hft_top #(
     wire [1:0] key_s;
     wire [9:0] sw;
     sync2 #(.WIDTH(12)) u_sync (.clk(clk), .d({KEY[1:0], SW}), .q({key_s, sw}));
-    wire resetn = key_s[0];
+
+    // ---------------- KEY[2] view and KEY[3] data set (Parth) ----------------
+    wire [1:0] key23_s;
+    sync2 #(.WIDTH(2)) u_sync_k23 (.clk(clk), .d(KEY[3:2]), .q(key23_s));
+    reg  [1:0] key23_prev = 2'b11;                     // "pressed" at power-up: no false press
+    always @(posedge clk) key23_prev <= ~key23_s;
+    wire view_press = ~key23_s[0] & ~key23_prev[0];    // one pulse per KEY[2] press
+    wire data_press = ~key23_s[1] & ~key23_prev[1];    // one pulse per KEY[3] press
+
+    reg       use_test = 1'b0;                         // 0 = 1000-message market, 1 = 13-message test
+    reg [3:0] restart  = 4'd0;                         // short internal reset after switching data
+    always @(posedge clk) begin
+        if (data_press) begin
+            use_test <= ~use_test;
+            restart  <= 4'd15;
+        end else if (restart != 4'd0)
+            restart <= restart - 1'b1;
+    end
+
+    wire resetn = key_s[0] & (restart == 4'd0);
 
     reg step_prev;
     always @(posedge clk) step_prev <= ~key_s[1];
@@ -65,9 +93,12 @@ module hft_top #(
 
     // ---------------- market side (Parth) ----------------
     wire [9:0]  rom_addr;
-    wire [31:0] rom_q;
+    wire [31:0] market_q, small_q;
     market_rom #(.DEPTH(1024), .ADDR_W(10), .INIT_FILE(MARKET_HEX))
-        u_rom (.clk(clk), .addr(rom_addr), .q(rom_q));
+        u_rom (.clk(clk), .addr(rom_addr), .q(market_q));
+    market_rom #(.DEPTH(16), .ADDR_W(4), .INIT_FILE(SMALL_HEX))
+        u_small (.clk(clk), .addr(rom_addr[3:0]), .q(small_q));
+    wire [31:0] rom_q = use_test ? ((rom_addr < 10'd16) ? small_q : 32'hFFFFFFFF) : market_q;
 
     wire        msg_valid, msg_side, book_ready, book_done, msg_start, feed_end;
     wire [1:0]  msg_type;
@@ -80,6 +111,10 @@ module hft_top #(
     wire [2:0]  feed_state, book_state;
     wire        q_side;
     wire [5:0]  q_level;
+    reg  [1:0]  view = 2'd0;                           // 0 bot, 1 market, 2 bid depth, 3 ask depth
+    wire        depth_side  = (view == 2'd3);          // 0 = bid, 1 = ask
+    wire [5:0]  depth_level = depth_side ? best_ask : best_bid;
+    wire [12:0] depth_qty;
 
     feed_handler u_feed (
         .clk(clk), .resetn(resetn), .go(go),
@@ -99,6 +134,7 @@ module hft_top #(
         .bid_mask(bid_mask), .ask_mask(ask_mask),
         .trade_valid(trade_valid), .trade_side(trade_side), .trade_price(trade_price), .trade_qty(trade_qty),
         .q_side(q_side), .q_level(q_level), .q_qty(q_qty),
+        .q2_side(depth_side), .q2_level(depth_level), .q2_qty(depth_qty),
         .state_out(book_state)
     );
 
@@ -150,11 +186,12 @@ module hft_top #(
     );
 
     vga_adapter #(
-        .RESOLUTION("320x240"), .MONOCHROME("FALSE"),
-        .BITS_PER_COLOUR_CHANNEL(1), .BACKGROUND_IMAGE("black.mif")
+        .RESOLUTION("320x240"),
+        .COLOR_DEPTH(3),                          // 1 bit each for R, G, B (matches vga_colour)
+        .BACKGROUND_IMAGE("black_320x240_3.mif")
     ) VGA (
         .resetn(resetn), .clock(clk),
-        .colour(vga_colour), .x(vga_x), .y(vga_y), .plot(vga_plot),
+        .color(vga_colour), .x(vga_x), .y(vga_y), .write(vga_plot),
         .VGA_R(VGA_R), .VGA_G(VGA_G), .VGA_B(VGA_B),
         .VGA_HS(VGA_HS), .VGA_VS(VGA_VS),
         .VGA_BLANK_N(VGA_BLANK_N), .VGA_SYNC_N(VGA_SYNC_N), .VGA_CLK(VGA_CLK)
@@ -176,12 +213,38 @@ module hft_top #(
     wire [7:0] bid_dec = our_bid_live ? to_decimal(our_bid_px) : {DIGIT_DASH, DIGIT_DASH};
     wire [7:0] ask_dec = our_ask_live ? to_decimal(our_ask_px) : {DIGIT_DASH, DIGIT_DASH};
 
-    seg7 h5 (.d(bid_dec[7:4]), .seg(HEX5));
-    seg7 h4 (.d(bid_dec[3:0]), .seg(HEX4));
-    seg7 h3 (.d(ask_dec[7:4]), .seg(HEX3));
-    seg7 h2 (.d(ask_dec[3:0]), .seg(HEX2));
-    seg7 h1 (.d(DIGIT_BLANK),  .seg(HEX1));
-    seg7 h0 (.d(DIGIT_BLANK),  .seg(HEX0));
+    // ---------------- Parth's views: market and depth (KEY[2] cycles) ----------------
+    always @(posedge clk) if (view_press) view <= view + 2'd1;   // not reset: view survives KEY[0]
+
+    // market view: the order book's best bid / ask and the message count
+    wire [7:0] mkt_bid_dec = bid_valid ? to_decimal(best_bid) : {DIGIT_DASH, DIGIT_DASH};
+    wire [7:0] mkt_ask_dec = ask_valid ? to_decimal(best_ask) : {DIGIT_DASH, DIGIT_DASH};
+    wire [6:0] cnt_mod     = msg_count % 11'd100;
+    wire [3:0] cnt_tens    = cnt_mod / 7'd10;
+    wire [3:0] cnt_ones    = cnt_mod % 7'd10;
+
+    // depth views: total shares waiting at the best bid / best ask (read port 2)
+    wire [7:0]  dep_px_dec = depth_side ? mkt_ask_dec : mkt_bid_dec;
+    wire [3:0]  qty_th = depth_qty / 13'd1000;
+    wire [3:0]  qty_hu = (depth_qty / 13'd100) % 13'd10;
+    wire [3:0]  qty_te = (depth_qty / 13'd10)  % 13'd10;
+    wire [3:0]  qty_on = depth_qty % 13'd10;
+
+    reg [7:0] d54, d32, d10;
+    always @* begin
+        case (view)
+            2'd0: begin d54 = bid_dec;     d32 = ask_dec;          d10 = {DIGIT_BLANK, DIGIT_BLANK}; end
+            2'd1: begin d54 = mkt_bid_dec; d32 = mkt_ask_dec;      d10 = {cnt_tens, cnt_ones};       end
+            default: begin d54 = dep_px_dec; d32 = {qty_th, qty_hu}; d10 = {qty_te, qty_on};         end
+        endcase
+    end
+
+    seg7 h5 (.d(d54[7:4]), .seg(HEX5));
+    seg7 h4 (.d(d54[3:0]), .seg(HEX4));
+    seg7 h3 (.d(d32[7:4]), .seg(HEX3));
+    seg7 h2 (.d(d32[3:0]), .seg(HEX2));
+    seg7 h1 (.d(d10[7:4]), .seg(HEX1));
+    seg7 h0 (.d(d10[3:0]), .seg(HEX0));
 
     assign LEDR[9]   = killed;
     assign LEDR[8]   = feed_end;

@@ -6,3 +6,11 @@ sim/sim_out*.txt
 *.vcd
 *.wlf
 __pycache__/
+
+# Quartus build output / local state
+quartus/db/
+quartus/incremental_db/
+quartus/output_files/
+quartus/*.qsf.bak
+quartus/c5_pin_model_dump.txt
+*.bak

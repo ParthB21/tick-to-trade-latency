@@ -4,8 +4,6 @@
 // middle of the ladder. The first arrow that lands on a bar turns it on, moving from START.
 //   Up    : next level ABOVE the cursor that has a bar (bid or ask); stays if there is none
 //   Down  : next level BELOW the cursor that has a bar; stays if there is none
-//   Left  : jump to the best bid   (stays if there are no bids)
-//   Right : jump to the best ask   (stays if there are no asks)
 // The dashboard shows the cursor's price, side and shares in the top-right corner.
 // Holding an arrow repeats it (keyboard typematic), so the cursor walks bar to bar.
 module book_cursor #(
@@ -17,14 +15,10 @@ module book_cursor #(
     input      [4:0]  key_code,
     input      [63:0] bid_mask,
     input      [63:0] ask_mask,
-    input      [5:0]  best_bid,
-    input             bid_valid,
-    input      [5:0]  best_ask,
-    input             ask_valid,
     output reg [5:0]  cursor,
     output reg        active            // 0 from reset until the first arrow lands on a bar
 );
-    localparam K_UP = 5'd18, K_DOWN = 5'd19, K_LEFT = 5'd20, K_RIGHT = 5'd21;
+    localparam K_UP = 5'd18, K_DOWN = 5'd19;
 
     wire [63:0] bars  = bid_mask | ask_mask;
     // 2 << 63 overflows to 0, so at the top level "above" is empty, as it should be
@@ -44,8 +38,6 @@ module book_cursor #(
             case (key_code)
                 K_UP:    if (up_ok)     begin cursor <= up_idx;   active <= 1'b1; end
                 K_DOWN:  if (down_ok)   begin cursor <= down_idx; active <= 1'b1; end
-                K_LEFT:  if (bid_valid) begin cursor <= best_bid; active <= 1'b1; end
-                K_RIGHT: if (ask_valid) begin cursor <= best_ask; active <= 1'b1; end
                 default: ;
             endcase
     end

@@ -20,8 +20,8 @@ from msgfmt import ADD, CANCEL, TRADE, BID, ASK, pack
 
 # key codes used inside the hardware (kb_decoder.v -> order_entry.v)
 K_BUY, K_SELL, K_CANCEL, K_TRADE, K_SPACE, K_ENTER, K_ESC, K_BKSP = range(10, 18)
-K_UP, K_DOWN, K_LEFT, K_RIGHT = range(18, 22)          # arrows: VGA book cursor, order entry ignores them
-EXT_CODES = {0x5A: K_ENTER, 0x75: K_UP, 0x72: K_DOWN, 0x6B: K_LEFT, 0x74: K_RIGHT}
+K_UP, K_DOWN = 18, 19                                  # arrows: VGA book cursor, order entry ignores them
+EXT_CODES = {0x5A: K_ENTER, 0x75: K_UP, 0x72: K_DOWN}
 
 # PS/2 set-2 make codes
 DIGIT_CODES = [0x45, 0x16, 0x1E, 0x26, 0x25, 0x2E, 0x36, 0x3D, 0x3E, 0x46]   # top row 0..9

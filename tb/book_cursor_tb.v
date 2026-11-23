@@ -1,26 +1,23 @@
 // book_cursor_tb.v  (Pierce, M2)
 // Directed checks of the arrow-key cursor: off after reset, the first arrow starts from the
 // middle, bar-to-bar jumps both ways, stopping at the last bar and at the top/bottom level,
-// best bid/ask jumps, empty sides, other keys ignored.
+// empty book, other keys ignored.
 // Run from sim/:  sh run_all.sh   (or iverilog by hand, see run_all.sh)
 `timescale 1ns/1ps
 module book_cursor_tb;
-    localparam K_DIGIT = 5'd7, K_BUY = 5'd10, K_UP = 5'd18, K_DOWN = 5'd19, K_LEFT = 5'd20, K_RIGHT = 5'd21;
+    localparam K_DIGIT = 5'd7, K_BUY = 5'd10, K_UP = 5'd18, K_DOWN = 5'd19;
 
     reg clk = 0;
     always #10 clk = ~clk;
     reg         resetn = 0, key_valid = 0;
     reg  [4:0]  key_code = 0;
     reg  [63:0] bid_mask = 0, ask_mask = 0;
-    reg  [5:0]  best_bid = 0, best_ask = 0;
-    reg         bid_valid = 0, ask_valid = 0;
     wire [5:0]  cursor;
     wire        active;
 
     book_cursor dut (
         .clk(clk), .resetn(resetn), .key_valid(key_valid), .key_code(key_code),
         .bid_mask(bid_mask), .ask_mask(ask_mask),
-        .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
         .cursor(cursor), .active(active)
     );
 
@@ -56,7 +53,6 @@ module book_cursor_tb;
         begin
             bid_mask = (64'd1 << 10) | (64'd1 << 20) | (64'd1 << 28);
             ask_mask = (64'd1 << 33) | (64'd1 << 40) | (64'd1 << 63);
-            best_bid = 6'd28; bid_valid = 1; best_ask = 6'd33; ask_valid = 1;
         end
     endtask
 
@@ -68,9 +64,9 @@ module book_cursor_tb;
         check_reset("reset");
 
         press(K_DIGIT, 6'd32, 0, "digit key leaves the cursor off");
-        bid_mask = 0; ask_mask = 0; bid_valid = 0; ask_valid = 0;
+        bid_mask = 0; ask_mask = 0;
         press(K_UP,    6'd32, 0, "empty book: first up stays off");
-        press(K_LEFT,  6'd32, 0, "empty book: first left stays off");
+        press(K_DOWN,  6'd32, 0, "empty book: first down stays off");
         book_a;
         press(K_UP,    6'd33, 1, "first up starts from 32 -> 33, cursor on");
         press(K_UP,    6'd40, 1, "up -> 40 (skips empty levels)");
@@ -82,22 +78,20 @@ module book_cursor_tb;
         press(K_DOWN,  6'd20, 1, "down -> 20");
         press(K_DOWN,  6'd10, 1, "down -> 10");
         press(K_DOWN,  6'd10, 1, "down below the last bar stays");
-        press(K_RIGHT, 6'd33, 1, "right -> best ask 33");
-        press(K_LEFT,  6'd28, 1, "left -> best bid 28");
-        press(K_DIGIT, 6'd28, 1, "digit key ignored");
-        press(K_BUY,   6'd28, 1, "B key ignored");
+        press(K_UP,    6'd20, 1, "up -> 20");
+        press(K_DIGIT, 6'd20, 1, "digit key ignored");
+        press(K_BUY,   6'd20, 1, "B key ignored");
+        press(5'd20,   6'd20, 1, "unused key code 20 ignored");
 
         // a bar at level 0: down must reach it, and up from 0 must work
-        bid_mask = 64'd1;  best_bid = 6'd0;
+        bid_mask = 64'd1;
         press(K_DOWN,  6'd0,  1, "down -> level 0");
         press(K_UP,    6'd33, 1, "up from 0 -> 33 (only asks above)");
 
         // empty book: nothing moves, the cursor stays on
-        bid_mask = 0; ask_mask = 0; bid_valid = 0; ask_valid = 0;
+        bid_mask = 0; ask_mask = 0;
         press(K_UP,    6'd33, 1, "empty book: up stays");
         press(K_DOWN,  6'd33, 1, "empty book: down stays");
-        press(K_LEFT,  6'd33, 1, "no bids: left stays");
-        press(K_RIGHT, 6'd33, 1, "no asks: right stays");
 
         // reset turns it off at the middle again; the first down then starts from 32
         resetn = 0; @(negedge clk); resetn = 1; @(negedge clk);

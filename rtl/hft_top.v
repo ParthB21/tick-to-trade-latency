@@ -23,7 +23,7 @@
 //            (any keyboard key except the arrows jumps to the entry view)
 //   PS/2     order entry: B<price> <qty>Enter, S<price> <qty>Enter, X<id>Enter, T<id> <qty>Enter
 //   arrows   VGA cursor: off after reset; the first arrow starts it from the middle (level 32).
-//            up/down next bar above/below, left best bid, right best ask;
+//            up/down move to the next bar above/below;
 //            its bar turns white and the top-right corner shows its side, price and shares
 //   KEY[3]   data set: 1000-message market <-> 13-message hand-checkable test
 //            (switching restarts everything, like KEY[0]; starts on the market data)
@@ -176,14 +176,13 @@ module hft_top #(
     );
 
     // ---------------- arrow-key book cursor (Pierce, M2): shown on the VGA ladder ----------------
-    localparam K_FIRST_ARROW = 5'd18;                  // kb_decoder: 18..21 = up, down, left, right
+    localparam K_FIRST_ARROW = 5'd18;                  // kb_decoder: 18 = up, 19 = down
     wire [5:0] cursor;
     wire       cursor_active;
     wire       arrow_key = (key_code >= K_FIRST_ARROW);
     book_cursor u_cursor (
         .clk(clk), .resetn(resetn), .key_valid(key_valid), .key_code(key_code),
         .bid_mask(bid_mask), .ask_mask(ask_mask),
-        .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
         .cursor(cursor), .active(cursor_active)
     );
 

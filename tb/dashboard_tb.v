@@ -1,13 +1,15 @@
 // dashboard_tb.v  (Pierce)
 // Runs dashboard.v against a fake order book and the simulation VGA stub, for
-// several quote / position / P&L cases (negative, clamped, zero, -512).
-// For each case it waits two full frames, dumps the frame buffer to
+// several quote / position / P&L / cursor cases (negative, clamped, zero, -512).
+// For each case it waits three full frames, dumps the frame buffer to
 // out/dash_<n>.hex and logs the case to out/dash_cases.txt;
 // python/check_dashboard.py renders the same cases and compares every pixel.
 `timescale 1ns/1ps
 module dashboard_tb;
     localparam N_CASES        = 3;
-    localparam FRAMES_TO_WAIT = 2;          // the first may have started before the inputs changed
+    // the first may have started before the inputs changed, and the cursor readout shows the
+    // shares captured on the frame before, so frame 3 is the first fully new one
+    localparam FRAMES_TO_WAIT = 3;
     localparam LAST_X = 9'd319, LAST_Y = 8'd239;
 
     reg clk = 0;
@@ -33,6 +35,7 @@ module dashboard_tb;
     reg        [15:0] fill_count;
     reg        [5:0]  fill_px, reject;
     reg        [29:0] entry_disp;
+    reg        [5:0]  cursor;
     wire [8:0] x;
     wire [7:0] y;
     wire [2:0] colour;
@@ -46,7 +49,7 @@ module dashboard_tb;
         .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
         .msg_count(msg_count), .our_size(our_size), .skew_on(skew_on),
         .fill_count(fill_count), .fill_side(fill_side), .fill_px(fill_px), .fill_qty(fill_qty),
-        .entry_disp(entry_disp), .reject(reject),
+        .entry_disp(entry_disp), .reject(reject), .cursor(cursor),
         .x(x), .y(y), .colour(colour), .plot(plot)
     );
 
@@ -75,12 +78,12 @@ module dashboard_tb;
             @(posedge clk);
             $sformat(name, "out/dash_%0d.hex", n);
             $writememh(name, VGA.fb);
-            $fdisplay(fcase, "%0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d",
+            $fdisplay(fcase, "%0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d",
                       n, b_live, b_px, a_live, a_px, pos, p,
                       best_bid, bid_valid, best_ask, ask_valid, msg_count, our_size, skew_on,
                       fill_count, fill_side, fill_px, fill_qty, reject,
                       entry_disp[29:25], entry_disp[24:20], entry_disp[19:15],
-                      entry_disp[14:10], entry_disp[9:5], entry_disp[4:0]);
+                      entry_disp[14:10], entry_disp[9:5], entry_disp[4:0], cursor);
         end
     endtask
 
@@ -89,23 +92,26 @@ module dashboard_tb;
         bid_live = 0; ask_live = 0; bid_px = 0; ask_px = 0; position = 0; pnl = 0;
         best_bid = 0; best_ask = 0; bid_valid = 0; ask_valid = 0; skew_on = 0; fill_side = 0;
         msg_count = 0; our_size = 0; fill_qty = 0; fill_count = 0; fill_px = 0; reject = 0;
-        entry_disp = {6{5'd10}};
+        entry_disp = {6{5'd10}}; cursor = 6'd32;
         repeat (2) @(posedge clk);
         resetn = 1;
         //       n  bid      ask      position  pnl
         // panel case 0: two-sided book, skew on, no fills yet, keyboard idle, no rejects
         best_bid = 6'd30; bid_valid = 1; best_ask = 6'd34; ask_valid = 1; msg_count = 11'd1234;
         our_size = 8'd2; skew_on = 1; fill_count = 0; reject = 6'd0; entry_disp = {6{5'd10}};
+        cursor = 6'd30;                                             // ask-only level: red readout
         run_case(0, 1, 6'd30, 1, 6'd34, -10'sd37,  -24'sd123456);   // negative, |P&L| clamps to 99999
         // panel case 1: no bids, a sell fill, typing "S P 14", KILL + SIDE + CROSS flags
         best_bid = 6'd0; bid_valid = 0; best_ask = 6'd63; ask_valid = 1; msg_count = 11'd7;
         our_size = 8'd8; skew_on = 0; fill_count = 16'd12; fill_side = 1; fill_px = 6'd63; fill_qty = 8'd3;
         reject = 6'b100011; entry_disp = {5'd17, 5'd23, 5'd15, 5'd15, 5'd1, 5'd4};
+        cursor = 6'd63;                                             // top level: right marker under the box
         run_case(1, 0, 6'd0,  1, 6'd63,  10'sd5,    24'sd4321);     // bid pulled, ask at the top level
         // panel case 2: clamps (2047 msgs, size 255 -> 9, 12345 fills -> 9999), a buy fill, "Err", all flags
         best_bid = 6'd0; bid_valid = 1; best_ask = 6'd1; ask_valid = 1; msg_count = 11'd2047;
         our_size = 8'd255; fill_count = 16'd12345; fill_side = 0; fill_px = 6'd0; fill_qty = 8'd255;
         reject = 6'b111111; entry_disp = {5'd20, 5'd21, 5'd21, 5'd15, 5'd15, 5'd15};
+        cursor = 6'd2;                                              // bid level near the bottom
         run_case(2, 1, 6'd0,  0, 6'd0,  -10'sd512,  24'sd0);        // -512 magnitude, zero P&L is "+"
         $fclose(fcase);
         $display("dashboard: %0d cases dumped", N_CASES);

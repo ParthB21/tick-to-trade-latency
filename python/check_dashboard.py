@@ -30,7 +30,7 @@ if __name__ == "__main__":
         panel = dict(best_bid=best_bid, bid_valid=bool(bid_valid), best_ask=best_ask,
                      ask_valid=bool(ask_valid), msg_count=msg_count, size=size, skew=bool(skew),
                      fill_count=fill_count, fill_side=fill_side, fill_px=fill_px, fill_qty=fill_qty,
-                     keys=list(c[19:25]), reject=reject)
+                     keys=list(c[19:25]), reject=reject, cursor=c[25])
         exp = render(qty, bid_live, bid_px, ask_live, ask_px, position, pnl, panel)
         got = read_frame(os.path.join(out, f"dash_{n}.hex"))
         write_png(got, os.path.join(out, f"dash_{n}.png"))

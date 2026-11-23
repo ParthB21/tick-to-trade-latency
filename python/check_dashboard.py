@@ -23,8 +23,15 @@ if __name__ == "__main__":
     with open(os.path.join(out, "dash_cases.txt")) as f:
         cases = [tuple(map(int, line.split())) for line in f if line.strip()]
     errors = 0
-    for n, bid_live, bid_px, ask_live, ask_px, position, pnl in cases:
-        exp = render(qty, bid_live, bid_px, ask_live, ask_px, position, pnl)
+    for c in cases:
+        n, bid_live, bid_px, ask_live, ask_px, position, pnl = c[:7]
+        (best_bid, bid_valid, best_ask, ask_valid, msg_count, size, skew,
+         fill_count, fill_side, fill_px, fill_qty, reject) = c[7:19]
+        panel = dict(best_bid=best_bid, bid_valid=bool(bid_valid), best_ask=best_ask,
+                     ask_valid=bool(ask_valid), msg_count=msg_count, size=size, skew=bool(skew),
+                     fill_count=fill_count, fill_side=fill_side, fill_px=fill_px, fill_qty=fill_qty,
+                     keys=list(c[19:25]), reject=reject)
+        exp = render(qty, bid_live, bid_px, ask_live, ask_px, position, pnl, panel)
         got = read_frame(os.path.join(out, f"dash_{n}.hex"))
         write_png(got, os.path.join(out, f"dash_{n}.png"))
         diffs = compare_frames(exp, got)

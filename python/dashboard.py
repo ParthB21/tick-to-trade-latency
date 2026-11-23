@@ -8,6 +8,7 @@ Colours are the adapter's 3-bit {R, G, B} codes.
 import struct
 import zlib
 from msgfmt import N_LEVELS, BID, ASK
+from font import FONT
 
 WIDTH, HEIGHT = 320, 240
 ROW_H = 3                       # rows per level; the last one is a black gap
@@ -18,29 +19,19 @@ MARK_W = 8
 BID_MARK_X, ASK_MARK_X = 8, 304
 BLACK, GREEN, RED, YELLOW, WHITE = 0b000, 0b010, 0b100, 0b110, 0b111
 
-# text: 5x7 glyphs drawn 2x, one per 16-pixel cell
-TEXT_X, POS_Y, PNL_Y = 8, 196, 218
-CELL_W, SCALE, GLYPH_W, GLYPH_H = 16, 2, 5, 7
-PNL_SHOWN = 99999
-FONT = {
-    "0": ("01110", "10001", "10011", "10101", "11001", "10001", "01110"),
-    "1": ("00100", "01100", "00100", "00100", "00100", "00100", "01110"),
-    "2": ("01110", "10001", "00001", "00010", "00100", "01000", "11111"),
-    "3": ("11111", "00010", "00100", "00010", "00001", "10001", "01110"),
-    "4": ("00010", "00110", "01010", "10010", "11111", "00010", "00010"),
-    "5": ("11111", "10000", "11110", "00001", "00001", "10001", "01110"),
-    "6": ("00110", "01000", "10000", "11110", "10001", "10001", "01110"),
-    "7": ("11111", "00001", "00010", "00100", "01000", "01000", "01000"),
-    "8": ("01110", "10001", "10001", "01110", "10001", "10001", "01110"),
-    "9": ("01110", "10001", "10001", "01111", "00001", "00010", "01100"),
-    "+": ("00000", "00100", "00100", "11111", "00100", "00100", "00000"),
-    "-": ("00000", "00000", "00000", "11111", "00000", "00000", "00000"),
-    "P": ("11110", "10001", "10001", "11110", "10000", "10000", "10000"),
-    "O": ("01110", "10001", "10001", "10001", "10001", "10001", "01110"),
-    "S": ("01111", "10000", "10000", "01110", "00001", "00001", "11110"),
-    "N": ("10001", "11001", "10101", "10011", "10001", "10001", "10001"),
-    "L": ("10000", "10000", "10000", "10000", "10000", "10000", "11111"),
-}
+# text panel (M2): 6 lines of 5x7 glyphs at 1x, 8-pixel cells, line k at row 192 + 8k
+TEXT_X, TEXT_Y, CELL_W, LINE_H = 4, 192, 8, 8
+PNL_SHOWN, FILLS_SHOWN = 99999, 9999
+CYAN = 0b011
+SEG_CHAR = {**{d: str(d) for d in range(10)}, 10: "-", 16: "B", 17: "S", 18: "C", 19: "T",
+            20: "E", 21: "R", 22: "D", 23: "P", 24: "Q", 25: "F"}
+IDLE_KEYS = [10] * 6                       # order entry with nothing typed: "------"
+RISK_WORDS = [(5, "KILL"), (10, "SIDE"), (15, "SIZE"), (20, "LONG"), (25, "SHORT"), (31, "CROSS")]
+
+
+def default_panel():
+    return dict(best_bid=0, bid_valid=False, best_ask=0, ask_valid=False, msg_count=0, size=0,
+                skew=False, fill_count=0, fill_side=0, fill_px=0, fill_qty=0, keys=IDLE_KEYS, reject=0)
 
 
 def bar_len(qty):
@@ -49,28 +40,75 @@ def bar_len(qty):
     return max(1, min(qty >> QTY_SHIFT, BAR_MAX))
 
 
-def text_lines(position, pnl):
-    """[(top row, string, colour)] for the two text lines."""
-    sign = lambda v: "-" if v < 0 else "+"
-    pos_text = f"POS {sign(position)}{abs(position):03d}"
-    pnl_text = f"PNL {sign(pnl)}{min(abs(pnl), PNL_SHOWN):05d}"
-    return [(POS_Y, pos_text, WHITE), (PNL_Y, pnl_text, RED if pnl < 0 else GREEN)]
-
-
-def draw_text(frame, top, text, colour):
+def put(line, slot, text):
     for i, ch in enumerate(text):
-        if ch == " ":
-            continue
-        left = TEXT_X + i * CELL_W
-        for r, bits in enumerate(FONT[ch]):
-            for c, bit in enumerate(bits):
-                if bit == "1":
-                    for y in range(top + r * SCALE, top + (r + 1) * SCALE):
-                        frame[y][left + c * SCALE:left + (c + 1) * SCALE] = [colour] * SCALE
+        line[slot + i] = ch
 
 
-def render(qty, bid_live, bid_px, ask_live, ask_px, position, pnl):
-    """qty[side][level] -> frame[y][x]."""
+def text_lines(bid_live, bid_px, ask_live, ask_px, position, pnl, p):
+    """6 lines of 39 characters plus a colour per character, same layout as dashboard.v."""
+    sign = lambda v: "-" if v < 0 else "+"
+    two = lambda ok, v: f"{v:02d}" if ok else "--"
+    lines = [[" "] * 39 for _ in range(6)]
+    l0 = lines[0]
+    put(l0, 0, "BOOK"); put(l0, 5, "BID"); put(l0, 9, two(p["bid_valid"], p["best_bid"]))
+    put(l0, 12, "ASK"); put(l0, 16, two(p["ask_valid"], p["best_ask"]))
+    put(l0, 19, "SPREAD")
+    put(l0, 26, two(p["bid_valid"] and p["ask_valid"], (p["best_ask"] - p["best_bid"]) % 64))
+    put(l0, 29, "MSGS"); put(l0, 34, f"{p['msg_count']:04d}")
+    l1 = lines[1]
+    put(l1, 0, "BOT"); put(l1, 5, "BID"); put(l1, 9, two(bid_live, bid_px))
+    put(l1, 12, "ASK"); put(l1, 16, two(ask_live, ask_px))
+    put(l1, 19, "SIZE"); put(l1, 24, str(min(p["size"], 9)))
+    put(l1, 26, "SKEW"); put(l1, 31, "ON" if p["skew"] else "OFF")
+    l2 = lines[2]
+    put(l2, 0, f"POS {sign(position)}{abs(position):03d}")
+    put(l2, 11, f"PNL {sign(pnl)}{min(abs(pnl), PNL_SHOWN):05d}")
+    l3 = lines[3]
+    put(l3, 0, f"FILLS {min(p['fill_count'], FILLS_SHOWN):04d}")
+    if p["fill_count"]:
+        put(l3, 12, "LAST"); put(l3, 17, "SELL" if p["fill_side"] else "BUY")
+        put(l3, 22, f"{p['fill_qty']:03d}"); put(l3, 26, "AT"); put(l3, 29, f"{p['fill_px']:02d}")
+    l4 = lines[4]
+    put(l4, 0, "KEYS")
+    for slot, code in zip((6, 8, 10, 11, 12, 13), p["keys"]):
+        l4[slot] = SEG_CHAR.get(code, " ")
+    l5 = lines[5]
+    put(l5, 0, "RISK")
+    if p["reject"] == 0:
+        put(l5, 5, "OK")
+    for bit, (slot, word) in enumerate(RISK_WORDS):
+        if p["reject"] >> bit & 1:
+            put(l5, slot, word)
+    pnl_col = RED if pnl < 0 else GREEN
+    colours = [
+        [WHITE] * 39,
+        [YELLOW] * 39,
+        [WHITE if i < 11 else pnl_col for i in range(39)],
+        [CYAN] * 39,
+        [RED if p["keys"][0] == 20 else WHITE] * 39,
+        [GREEN if p["reject"] == 0 else RED] * 39,
+    ]
+    return ["".join(l) for l in lines], colours
+
+
+def draw_panel(frame, lines, colours):
+    for k, (text, cols) in enumerate(zip(lines, colours)):
+        top = TEXT_Y + k * LINE_H
+        for i, ch in enumerate(text):
+            if ch == " ":
+                continue
+            left = TEXT_X + i * CELL_W
+            for r, bits in enumerate(FONT[ch]):
+                for c, bit in enumerate(bits):
+                    if bit == "1":
+                        frame[top + r][left + c] = cols[i]
+
+
+def render(qty, bid_live, bid_px, ask_live, ask_px, position, pnl, panel=None):
+    """qty[side][level] -> frame[y][x]. panel = default_panel()-style dict for the text panel."""
+    p = default_panel()
+    p.update(panel or {})
     frame = [[BLACK] * WIDTH for _ in range(HEIGHT)]
     for level in range(N_LEVELS):
         bid_l, ask_l = bar_len(qty[BID][level]), bar_len(qty[ASK][level])
@@ -85,8 +123,7 @@ def render(qty, bid_live, bid_px, ask_live, ask_px, position, pnl):
                 row[BID_MARK_X:BID_MARK_X + MARK_W] = [YELLOW] * MARK_W
             if ask_live and level == ask_px:
                 row[ASK_MARK_X:ASK_MARK_X + MARK_W] = [YELLOW] * MARK_W
-    for top, text, colour in text_lines(position, pnl):
-        draw_text(frame, top, text, colour)
+    draw_panel(frame, *text_lines(bid_live, bid_px, ask_live, ask_px, position, pnl, p))
     return frame
 
 

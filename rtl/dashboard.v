@@ -8,17 +8,25 @@
 //   asks : red bar starting at x = 160, growing right
 //   bar length = min(qty >> 5, 159) pixels, at least 1 pixel if qty > 0
 //   our live bid / ask : yellow 8-pixel marker at x = 8..15 / x = 304..311
-// Text (rows 192..239), font_rom glyphs drawn 2x (10x14 pixels, one per 16-pixel cell):
-//   "POS +ddd"   at y = 196, white
-//   "PNL +ddddd" at y = 218, green when P&L >= 0, red when negative (|P&L| shown up to 99999)
+// Text panel (rows 192..239), M2 (Parth, with Pierce): 6 lines of 5x7 glyphs at 1x,
+// one 8-pixel cell per character (39 per line), line k at rows 192 + 8k:
+//   0 white  : BOOK BID bb ASK aa SPREAD ss MSGS mmmm   market best bid/ask, spread, ROM msgs
+//   1 yellow : BOT  BID bb ASK aa SIZE z SKEW ON/OFF    our quotes ("--" = not live)
+//   2        : POS sddd   PNL sddddd                    POS white; PNL green (>= 0) / red (< 0)
+//   3 cyan   : FILLS ffff  LAST SELL/BUY qqq AT pp       fill count, last fill
+//   4 white  : KEYS c f dddd                            keyboard entry (same codes as the HEX
+//                                                        entry view); red when it says ERR
+//   5        : RISK OK (green) or the sticky reject flags (red):
+//              KILL SIDE SIZE LONG SHORT CROSS
+// Every number is converted with bin2bcd (sequential, started at the frame start).
 //
 // The FSM never erases: it repaints every pixel (bar/text colour or black)
 // over and over, so old bars and digits are overwritten automatically.
 //   per level : ADDR_BID -> ADDR_ASK -> LATCH_ASK -> DRAW (3 rows x 320 pixels)
 //   then TEXT : 48 rows x 320 pixels
 //   per frame : 64 x (3 + 960) + 15,360 = 76,992 cycles = 1.54 ms at 50 MHz
-// Quotes, position and P&L are latched at the start of each frame; bin2bcd turns
-// position and P&L into digits (17 cycles) long before the text pass reads them.
+// Everything shown is latched at the start of each frame (bin2bcd takes at most 17 cycles),
+// long before the text pass reads it, so a frame never mixes old and new values.
 module dashboard (
     input             clk,
     input             resetn,
@@ -37,6 +45,21 @@ module dashboard (
     // from the P&L tracker
     input  signed [9:0]  position,
     input  signed [23:0] pnl,
+
+    // status panel (M2)
+    input      [5:0]  best_bid,          // order book top
+    input             bid_valid,
+    input      [5:0]  best_ask,
+    input             ask_valid,
+    input      [10:0] msg_count,         // ROM messages processed
+    input      [7:0]  our_size,          // risk gate quote size
+    input             skew_on,           // SW[2]
+    input      [15:0] fill_count,        // matching engine
+    input             fill_side,         // last fill: 0 bought, 1 sold
+    input      [5:0]  fill_px,
+    input      [7:0]  fill_qty,
+    input      [29:0] entry_disp,        // order entry display codes (seg7 codes, HEX5 first)
+    input      [5:0]  reject,            // risk gate sticky reject flags
 
     // to vga_adapter
     output reg [8:0]  x,
@@ -57,17 +80,21 @@ module dashboard (
     localparam ASK_MARK_X = 9'd304;
 
     localparam LAST_Y     = 8'd239;
-    localparam TEXT_X     = 9'd8;      // left edge of the first character cell
-    localparam POS_Y      = 8'd196;    // top row of "POS ..."
-    localparam PNL_Y      = 8'd218;    // top row of "PNL ..."
-    localparam TEXT_H     = 8'd14;     // 7 glyph rows drawn 2x
+    localparam TEXT_X     = 9'd4;      // left edge of the first character cell
+    localparam TEXT_Y     = 8'd192;    // top row of text line 0; line k starts at 192 + 8k
     localparam GLYPH_W    = 3'd5;
     localparam PNL_SHOWN  = 17'd99999; // largest |P&L| that fits 5 digits
+    localparam FILLS_SHOWN = 14'd9999;
 
-    localparam G_PLUS = 5'd10, G_MINUS = 5'd11, G_P = 5'd12, G_O = 5'd13,
-               G_S = 5'd14, G_N = 5'd15, G_L = 5'd16, G_SPACE = 5'd31;
+    // font_rom glyph codes (python/font.py): 0..9 digits
+    localparam [5:0] G_PLUS = 6'd10, G_MINUS = 6'd11,
+        G_A = 6'd12, G_B = 6'd13, G_C = 6'd14, G_D = 6'd15, G_E = 6'd16, G_F = 6'd17, G_G = 6'd18,
+        G_H = 6'd19, G_I = 6'd20, G_K = 6'd21, G_L = 6'd22, G_M = 6'd23, G_N = 6'd24, G_O = 6'd25,
+        G_P = 6'd26, G_Q = 6'd27, G_R = 6'd28, G_S = 6'd29, G_T = 6'd30, G_U = 6'd31, G_W = 6'd32,
+        G_Y = 6'd33, G_Z = 6'd34, G_SP = 6'd63;
 
-    localparam BLACK = 3'b000, GREEN = 3'b010, RED = 3'b100, YELLOW = 3'b110, WHITE = 3'b111;
+    localparam BLACK = 3'b000, GREEN = 3'b010, RED = 3'b100, YELLOW = 3'b110, WHITE = 3'b111,
+               CYAN = 3'b011;
 
     reg [2:0] state;
     reg [5:0] level;
@@ -82,61 +109,197 @@ module dashboard (
     assign q_level = level;
     assign plot    = (state == S_DRAW) || (state == S_TEXT);
 
-    // ---------------- position / P&L digits ----------------
+    // ---------------- panel values, latched / converted at the frame start ----------------
     wire frame_start = (state == S_ADDR_BID) && (level == TOP_LEVEL);
     reg  f_pos_neg, f_pnl_neg;
+    reg  f_book_bid, f_book_ask, f_skew, f_has_fill, f_fill_side;
+    reg  [3:0]  f_size;
+    reg  [29:0] f_keys;
+    reg  [5:0]  f_reject;
+
     wire [9:0]  pos_mag   = position[9] ? -position : position;       // -512 -> 512 fits unsigned
     wire [23:0] pnl_abs   = pnl[23] ? -pnl : pnl;
     wire [16:0] pnl_mag   = (pnl_abs > PNL_SHOWN) ? PNL_SHOWN : pnl_abs[16:0];
-    wire [11:0] pos_bcd;
+    wire [5:0]  spread    = best_ask - best_bid;                       // only shown when both sides exist
+    wire [13:0] fills_mag = (fill_count > {2'b00, FILLS_SHOWN}) ? FILLS_SHOWN : fill_count[13:0];
+
+    wire [11:0] pos_bcd, fq_bcd;
     wire [19:0] pnl_bcd;
+    wire [7:0]  bb_bcd, ba_bcd, sp_bcd, ob_bcd, oa_bcd, fp_bcd;
+    wire [15:0] msg_bcd, fc_bcd;
 
     bin2bcd #(.BITS(10), .DIGITS(3)) u_pos_bcd (
         .clk(clk), .resetn(resetn), .start(frame_start), .value(pos_mag), .bcd(pos_bcd));
     bin2bcd #(.BITS(17), .DIGITS(5)) u_pnl_bcd (
         .clk(clk), .resetn(resetn), .start(frame_start), .value(pnl_mag), .bcd(pnl_bcd));
+    bin2bcd #(.BITS(6), .DIGITS(2)) u_bb_bcd (
+        .clk(clk), .resetn(resetn), .start(frame_start), .value(best_bid), .bcd(bb_bcd));
+    bin2bcd #(.BITS(6), .DIGITS(2)) u_ba_bcd (
+        .clk(clk), .resetn(resetn), .start(frame_start), .value(best_ask), .bcd(ba_bcd));
+    bin2bcd #(.BITS(6), .DIGITS(2)) u_sp_bcd (
+        .clk(clk), .resetn(resetn), .start(frame_start), .value(spread), .bcd(sp_bcd));
+    bin2bcd #(.BITS(11), .DIGITS(4)) u_msg_bcd (
+        .clk(clk), .resetn(resetn), .start(frame_start), .value(msg_count), .bcd(msg_bcd));
+    bin2bcd #(.BITS(6), .DIGITS(2)) u_ob_bcd (
+        .clk(clk), .resetn(resetn), .start(frame_start), .value(our_bid_px), .bcd(ob_bcd));
+    bin2bcd #(.BITS(6), .DIGITS(2)) u_oa_bcd (
+        .clk(clk), .resetn(resetn), .start(frame_start), .value(our_ask_px), .bcd(oa_bcd));
+    bin2bcd #(.BITS(14), .DIGITS(4)) u_fc_bcd (
+        .clk(clk), .resetn(resetn), .start(frame_start), .value(fills_mag), .bcd(fc_bcd));
+    bin2bcd #(.BITS(8), .DIGITS(3)) u_fq_bcd (
+        .clk(clk), .resetn(resetn), .start(frame_start), .value(fill_qty), .bcd(fq_bcd));
+    bin2bcd #(.BITS(6), .DIGITS(2)) u_fp_bcd (
+        .clk(clk), .resetn(resetn), .start(frame_start), .value(fill_px), .bcd(fp_bcd));
 
     // ---------------- text pixel ----------------
-    wire [8:0] tx      = x - TEXT_X;                 // x < TEXT_X wraps to a cell past the text
-    wire [4:0] slot    = tx[8:4];                    // 16-pixel character cell index
-    wire [2:0] gcol    = tx[3:1];
-    wire       in_pos  = (y >= POS_Y) && (y < POS_Y + TEXT_H);
-    wire       in_pnl  = (y >= PNL_Y) && (y < PNL_Y + TEXT_H);
-    wire [7:0] ty      = y - (in_pos ? POS_Y : PNL_Y);
-    wire [2:0] grow    = ty[3:1];
-    wire [4:0] pos_sign = f_pos_neg ? G_MINUS : G_PLUS;
-    wire [4:0] pnl_sign = f_pnl_neg ? G_MINUS : G_PLUS;
+    function [5:0] dg(input [3:0] d); dg = {2'b00, d}; endfunction       // BCD digit -> glyph
+
+    // order-entry display code (seg7.v codes) -> glyph
+    function [5:0] seg_glyph(input [4:0] c);
+        case (c)
+            5'd0, 5'd1, 5'd2, 5'd3, 5'd4, 5'd5, 5'd6, 5'd7, 5'd8, 5'd9: seg_glyph = {1'b0, c};
+            5'd10: seg_glyph = G_MINUS;
+            5'd16: seg_glyph = G_B;   5'd17: seg_glyph = G_S;   5'd18: seg_glyph = G_C;
+            5'd19: seg_glyph = G_T;   5'd20: seg_glyph = G_E;   5'd21: seg_glyph = G_R;
+            5'd22: seg_glyph = G_D;   5'd23: seg_glyph = G_P;   5'd24: seg_glyph = G_Q;
+            5'd25: seg_glyph = G_F;
+            default: seg_glyph = G_SP;
+        endcase
+    endfunction
+
+    wire [8:0] tx    = x - TEXT_X;                   // x < TEXT_X wraps to a cell past the text
+    wire [5:0] slot  = tx[8:3];                      // 8-pixel character cell index, 0..38
+    wire [2:0] gcol  = tx[2:0];
+    wire [7:0] ty    = y - TEXT_Y;
+    wire [2:0] tline = ty[5:3];                      // text line 0..5
+    wire [2:0] grow  = ty[2:0];                      // glyph row; row 7 is the gap between lines
+    wire [5:0] pos_sign = f_pos_neg ? G_MINUS : G_PLUS;
+    wire [5:0] pnl_sign = f_pnl_neg ? G_MINUS : G_PLUS;
+    wire       two_sided = f_book_bid & f_book_ask;
+    wire       keys_err  = (f_keys[29:25] == 5'd20);  // entry shows "E r r"
     wire [4:0] font_bits;
-    reg  [4:0] glyph;
+    reg  [5:0] glyph;
 
     always @* begin
-        glyph = G_SPACE;
-        if (in_pos)
-            case (slot)
-                5'd0: glyph = G_P;    5'd1: glyph = G_O;    5'd2: glyph = G_S;
-                5'd4: glyph = pos_sign;
-                5'd5: glyph = {1'b0, pos_bcd[11:8]};
-                5'd6: glyph = {1'b0, pos_bcd[7:4]};
-                5'd7: glyph = {1'b0, pos_bcd[3:0]};
-                default: glyph = G_SPACE;
+        glyph = G_SP;
+        case (tline)
+            // BOOK BID bb ASK aa SPREAD ss MSGS mmmm
+            3'd0: case (slot)
+                6'd0: glyph = G_B;  6'd1: glyph = G_O;  6'd2: glyph = G_O;  6'd3: glyph = G_K;
+                6'd5: glyph = G_B;  6'd6: glyph = G_I;  6'd7: glyph = G_D;
+                6'd9:  glyph = f_book_bid ? dg(bb_bcd[7:4]) : G_MINUS;
+                6'd10: glyph = f_book_bid ? dg(bb_bcd[3:0]) : G_MINUS;
+                6'd12: glyph = G_A; 6'd13: glyph = G_S; 6'd14: glyph = G_K;
+                6'd16: glyph = f_book_ask ? dg(ba_bcd[7:4]) : G_MINUS;
+                6'd17: glyph = f_book_ask ? dg(ba_bcd[3:0]) : G_MINUS;
+                6'd19: glyph = G_S; 6'd20: glyph = G_P; 6'd21: glyph = G_R; 6'd22: glyph = G_E;
+                6'd23: glyph = G_A; 6'd24: glyph = G_D;
+                6'd26: glyph = two_sided ? dg(sp_bcd[7:4]) : G_MINUS;
+                6'd27: glyph = two_sided ? dg(sp_bcd[3:0]) : G_MINUS;
+                6'd29: glyph = G_M; 6'd30: glyph = G_S; 6'd31: glyph = G_G; 6'd32: glyph = G_S;
+                6'd34: glyph = dg(msg_bcd[15:12]); 6'd35: glyph = dg(msg_bcd[11:8]);
+                6'd36: glyph = dg(msg_bcd[7:4]);   6'd37: glyph = dg(msg_bcd[3:0]);
+                default: glyph = G_SP;
             endcase
-        else if (in_pnl)
-            case (slot)
-                5'd0: glyph = G_P;    5'd1: glyph = G_N;    5'd2: glyph = G_L;
-                5'd4: glyph = pnl_sign;
-                5'd5: glyph = {1'b0, pnl_bcd[19:16]};
-                5'd6: glyph = {1'b0, pnl_bcd[15:12]};
-                5'd7: glyph = {1'b0, pnl_bcd[11:8]};
-                5'd8: glyph = {1'b0, pnl_bcd[7:4]};
-                5'd9: glyph = {1'b0, pnl_bcd[3:0]};
-                default: glyph = G_SPACE;
+            // BOT  BID bb ASK aa SIZE z SKEW ON / OFF
+            3'd1: case (slot)
+                6'd0: glyph = G_B;  6'd1: glyph = G_O;  6'd2: glyph = G_T;
+                6'd5: glyph = G_B;  6'd6: glyph = G_I;  6'd7: glyph = G_D;
+                6'd9:  glyph = f_bid_live ? dg(ob_bcd[7:4]) : G_MINUS;
+                6'd10: glyph = f_bid_live ? dg(ob_bcd[3:0]) : G_MINUS;
+                6'd12: glyph = G_A; 6'd13: glyph = G_S; 6'd14: glyph = G_K;
+                6'd16: glyph = f_ask_live ? dg(oa_bcd[7:4]) : G_MINUS;
+                6'd17: glyph = f_ask_live ? dg(oa_bcd[3:0]) : G_MINUS;
+                6'd19: glyph = G_S; 6'd20: glyph = G_I; 6'd21: glyph = G_Z; 6'd22: glyph = G_E;
+                6'd24: glyph = dg(f_size);
+                6'd26: glyph = G_S; 6'd27: glyph = G_K; 6'd28: glyph = G_E; 6'd29: glyph = G_W;
+                6'd31: glyph = G_O;
+                6'd32: glyph = f_skew ? G_N : G_F;
+                6'd33: glyph = f_skew ? G_SP : G_F;
+                default: glyph = G_SP;
             endcase
+            // POS sddd   PNL sddddd
+            3'd2: case (slot)
+                6'd0: glyph = G_P;  6'd1: glyph = G_O;  6'd2: glyph = G_S;
+                6'd4: glyph = pos_sign;
+                6'd5: glyph = dg(pos_bcd[11:8]); 6'd6: glyph = dg(pos_bcd[7:4]); 6'd7: glyph = dg(pos_bcd[3:0]);
+                6'd11: glyph = G_P; 6'd12: glyph = G_N; 6'd13: glyph = G_L;
+                6'd15: glyph = pnl_sign;
+                6'd16: glyph = dg(pnl_bcd[19:16]); 6'd17: glyph = dg(pnl_bcd[15:12]);
+                6'd18: glyph = dg(pnl_bcd[11:8]);  6'd19: glyph = dg(pnl_bcd[7:4]);
+                6'd20: glyph = dg(pnl_bcd[3:0]);
+                default: glyph = G_SP;
+            endcase
+            // FILLS ffff  LAST SELL qqq AT pp    (or LAST BUY ...; nothing after ffff before the first fill)
+            3'd3: case (slot)
+                6'd0: glyph = G_F;  6'd1: glyph = G_I;  6'd2: glyph = G_L;  6'd3: glyph = G_L;  6'd4: glyph = G_S;
+                6'd6: glyph = dg(fc_bcd[15:12]); 6'd7: glyph = dg(fc_bcd[11:8]);
+                6'd8: glyph = dg(fc_bcd[7:4]);   6'd9: glyph = dg(fc_bcd[3:0]);
+                6'd12: glyph = f_has_fill ? G_L : G_SP;  6'd13: glyph = f_has_fill ? G_A : G_SP;
+                6'd14: glyph = f_has_fill ? G_S : G_SP;  6'd15: glyph = f_has_fill ? G_T : G_SP;
+                6'd17: glyph = !f_has_fill ? G_SP : f_fill_side ? G_S : G_B;
+                6'd18: glyph = !f_has_fill ? G_SP : f_fill_side ? G_E : G_U;
+                6'd19: glyph = !f_has_fill ? G_SP : f_fill_side ? G_L : G_Y;
+                6'd20: glyph = (f_has_fill && f_fill_side) ? G_L : G_SP;
+                6'd22: glyph = f_has_fill ? dg(fq_bcd[11:8]) : G_SP;
+                6'd23: glyph = f_has_fill ? dg(fq_bcd[7:4])  : G_SP;
+                6'd24: glyph = f_has_fill ? dg(fq_bcd[3:0])  : G_SP;
+                6'd26: glyph = f_has_fill ? G_A : G_SP;  6'd27: glyph = f_has_fill ? G_T : G_SP;
+                6'd29: glyph = f_has_fill ? dg(fp_bcd[7:4]) : G_SP;
+                6'd30: glyph = f_has_fill ? dg(fp_bcd[3:0]) : G_SP;
+                default: glyph = G_SP;
+            endcase
+            // KEYS c f dddd   (the 6 HEX entry-view digits: letter, field, 4 digits)
+            3'd4: case (slot)
+                6'd0: glyph = G_K;  6'd1: glyph = G_E;  6'd2: glyph = G_Y;  6'd3: glyph = G_S;
+                6'd6:  glyph = seg_glyph(f_keys[29:25]);
+                6'd8:  glyph = seg_glyph(f_keys[24:20]);
+                6'd10: glyph = seg_glyph(f_keys[19:15]);
+                6'd11: glyph = seg_glyph(f_keys[14:10]);
+                6'd12: glyph = seg_glyph(f_keys[9:5]);
+                6'd13: glyph = seg_glyph(f_keys[4:0]);
+                default: glyph = G_SP;
+            endcase
+            // RISK OK   or   RISK KILL SIDE SIZE LONG SHORT CROSS (only the flags that are set)
+            3'd5: case (slot)
+                6'd0: glyph = G_R;  6'd1: glyph = G_I;  6'd2: glyph = G_S;  6'd3: glyph = G_K;
+                6'd5:  glyph = (f_reject == 6'd0) ? G_O : f_reject[0] ? G_K : G_SP;
+                6'd6:  glyph = (f_reject == 6'd0) ? G_K : f_reject[0] ? G_I : G_SP;
+                6'd7:  glyph = f_reject[0] ? G_L : G_SP;
+                6'd8:  glyph = f_reject[0] ? G_L : G_SP;
+                6'd10: glyph = f_reject[1] ? G_S : G_SP;  6'd11: glyph = f_reject[1] ? G_I : G_SP;
+                6'd12: glyph = f_reject[1] ? G_D : G_SP;  6'd13: glyph = f_reject[1] ? G_E : G_SP;
+                6'd15: glyph = f_reject[2] ? G_S : G_SP;  6'd16: glyph = f_reject[2] ? G_I : G_SP;
+                6'd17: glyph = f_reject[2] ? G_Z : G_SP;  6'd18: glyph = f_reject[2] ? G_E : G_SP;
+                6'd20: glyph = f_reject[3] ? G_L : G_SP;  6'd21: glyph = f_reject[3] ? G_O : G_SP;
+                6'd22: glyph = f_reject[3] ? G_N : G_SP;  6'd23: glyph = f_reject[3] ? G_G : G_SP;
+                6'd25: glyph = f_reject[4] ? G_S : G_SP;  6'd26: glyph = f_reject[4] ? G_H : G_SP;
+                6'd27: glyph = f_reject[4] ? G_O : G_SP;  6'd28: glyph = f_reject[4] ? G_R : G_SP;
+                6'd29: glyph = f_reject[4] ? G_T : G_SP;
+                6'd31: glyph = f_reject[5] ? G_C : G_SP;  6'd32: glyph = f_reject[5] ? G_R : G_SP;
+                6'd33: glyph = f_reject[5] ? G_O : G_SP;  6'd34: glyph = f_reject[5] ? G_S : G_SP;
+                6'd35: glyph = f_reject[5] ? G_S : G_SP;
+                default: glyph = G_SP;
+            endcase
+            default: glyph = G_SP;
+        endcase
     end
 
     font_rom u_font (.glyph(glyph), .row(grow), .bits(font_bits));
 
-    wire       text_lit    = (gcol < GLYPH_W) && font_bits[GLYPH_W - 1 - gcol];
-    wire [2:0] text_colour = !text_lit ? BLACK : in_pos ? WHITE : f_pnl_neg ? RED : GREEN;
+    wire       text_lit = (x >= TEXT_X) && (gcol < GLYPH_W) && font_bits[GLYPH_W - 1 - gcol];
+    reg  [2:0] line_colour;
+    always @* begin
+        case (tline)
+            3'd0:    line_colour = WHITE;
+            3'd1:    line_colour = YELLOW;                                   // our quotes = yellow marks
+            3'd2:    line_colour = (slot < 6'd11) ? WHITE : f_pnl_neg ? RED : GREEN;
+            3'd3:    line_colour = CYAN;
+            3'd4:    line_colour = keys_err ? RED : WHITE;
+            default: line_colour = (f_reject == 6'd0) ? GREEN : RED;
+        endcase
+    end
+    wire [2:0] text_colour = text_lit ? line_colour : BLACK;
 
     function [7:0] bar_len(input [12:0] qty);
         reg [7:0] scaled;
@@ -172,6 +335,8 @@ module dashboard (
             bid_len <= 8'd0; ask_len <= 8'd0;
             f_bid_live <= 1'b0; f_bid_px <= 6'd0; f_ask_live <= 1'b0; f_ask_px <= 6'd0;
             f_pos_neg <= 1'b0; f_pnl_neg <= 1'b0;
+            f_book_bid <= 1'b0; f_book_ask <= 1'b0; f_skew <= 1'b0; f_has_fill <= 1'b0;
+            f_fill_side <= 1'b0; f_keys <= {6{5'd10}}; f_reject <= 6'd0; f_size <= 4'd0;
         end else begin
             case (state)
                 S_ADDR_BID: begin
@@ -179,6 +344,11 @@ module dashboard (
                         f_bid_live <= our_bid_live; f_bid_px <= our_bid_px;
                         f_ask_live <= our_ask_live; f_ask_px <= our_ask_px;
                         f_pos_neg  <= position[9];  f_pnl_neg <= pnl[23];
+                        f_book_bid <= bid_valid;    f_book_ask <= ask_valid;
+                        f_skew     <= skew_on;      f_has_fill <= (fill_count != 16'd0);
+                        f_fill_side <= fill_side;   f_keys    <= entry_disp;
+                        f_reject   <= reject;
+                        f_size     <= (our_size > 8'd9) ? 4'd9 : our_size[3:0];
                     end
                     state <= S_ADDR_ASK;
                 end

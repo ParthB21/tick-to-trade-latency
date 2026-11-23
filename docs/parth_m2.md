@@ -22,7 +22,7 @@ They use Humor Sans if it's installed, as in M1, and Comic Sans otherwise.
 | System, half-spread 0 | 1010/1010, 186 fills |
 | System, half-spread 1, skew on (SW[2]) | 1010/1010, 42 fills |
 | Board demo sequence (13-message test + keyboard) | 17/17 messages, 3 fills |
-| Quartus (`hft_top`, merged with Pierce's M2) | 0 errors, Fmax 84.03 MHz, setup slack +8.06 ns, hold slack +0.17 ns, 1,248 ALMs (4%), 311,168 block-memory bits (8%) |
+| Quartus (`hft_top`, merged with Pierce's M2, with the VGA status panel) | 0 errors, Fmax 68.24 MHz, setup slack +5.35 ns, hold slack +0.17 ns, 1,577 ALMs (5%), 311,168 block-memory bits (8%) |
 
 Run all of them: `cd sim` then `.\run_m2_checks.ps1`.
 
@@ -275,6 +275,25 @@ The keyboard script covers:
 
 - **No `/` or `%`.** HEX digits now go through `bin2bcd_comb.v` (shift-and-add-3; renamed from `bin2bcd.v` at the merge, since Pierce's sequential `bin2bcd.v` drives the VGA text). `seg7.v` is 5 bits wide, with letters.
 - **Fills drive Pierce's P&L tracker.** Its position goes back to the strategy (skew, SW[2]) and the risk gate (limits). Merge notes: `docs/note_for_pierce.md`.
+
+## 6b. VGA status panel (Parth, with Pierce's agreement)
+
+The bottom of the screen (rows 192–239) now shows 6 lines of 5x7 text at 1x instead of
+2 lines at 2x, so everything on the HEX views is visible at once:
+
+| Line | Colour | Shows |
+|---|---|---|
+| `BOOK BID 12 ASK 14 SPREAD 02 MSGS 0004` | white | market best bid / ask, spread, ROM messages processed |
+| `BOT  BID 12 ASK 14 SIZE 2 SKEW OFF` | yellow | our quotes (`--` = not live), quote size, SW[2] |
+| `POS -002   PNL +00002` | white / green or red | Pierce's P&L tracker |
+| `FILLS 0001  LAST SELL 002 AT 14` | cyan | matching engine: fill count, last fill |
+| `KEYS S D 0001` | white (red for ERR) | the same 6 codes as the HEX entry view |
+| `RISK OK` / `RISK KILL SIDE ... CROSS` | green / red | the risk gate's sticky reject flags |
+
+Every number goes through Pierce's sequential `bin2bcd` at the frame start; the font is
+generated from `python/font.py` by `python/gen_font_rom.py`, so the hardware and the
+Python screen model share one table. `dashboard_tb` (3 panel cases, including clamps and
+all flags) and Pierce's e2e frame check both match the model on all 76,800 pixels.
 
 ## 7. Files (new or changed in M2)
 

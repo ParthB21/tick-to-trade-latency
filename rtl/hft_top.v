@@ -266,6 +266,10 @@ module hft_top #(
         .our_bid_live(our_bid_live), .our_bid_px(our_bid_px),
         .our_ask_live(our_ask_live), .our_ask_px(our_ask_px),
         .position(position), .pnl(pnl),
+        .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
+        .msg_count(msg_count), .our_size(our_size), .skew_on(sw[2]),
+        .fill_count(fill_count), .fill_side(fill_side), .fill_px(fill_px), .fill_qty(fill_qty),
+        .entry_disp(entry_disp), .reject(reject),
         .x(vga_x), .y(vga_y), .colour(vga_colour), .plot(vga_plot)
     );
 

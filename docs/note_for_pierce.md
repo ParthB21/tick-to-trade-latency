@@ -38,3 +38,12 @@ So the skew lags one message behind, and the risk limits do not lag. Both `e2e.p
 | on (SKEW_K = 2) | 42 | +1 | +25 | +50 |
 
 Your e2e at full speed with skew on: 1000/1000 orders, 0 pixel mismatches, final position +1, P&L +56.
+
+## Later: the VGA status panel (added by Parth)
+
+`rtl/dashboard.v` now draws 6 lines of text at 1x (5x7 glyphs, 8-pixel cells) instead of
+POS/PNL at 2x: BOOK, BOT, POS/PNL, FILLS, KEYS, RISK. New dashboard inputs: best bid/ask,
+msg_count, our_size, skew_on, fill_count/side/px/qty, entry_disp, reject. `rtl/font_rom.v`
+is now generated from `python/font.py` (6-bit glyph codes, 35 characters). `python/dashboard.py`,
+`check_dashboard.py`, `dashboard_tb.v` and `e2e.py` were extended to match; all pixel checks pass.
+Fmax is 68 MHz (setup slack +5.3 ns at 50 MHz).

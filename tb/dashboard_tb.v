@@ -25,6 +25,14 @@ module dashboard_tb;
     reg        [5:0]  bid_px, ask_px;
     reg signed [9:0]  position;
     reg signed [23:0] pnl;
+    // status panel inputs (M2)
+    reg        [5:0]  best_bid, best_ask;
+    reg               bid_valid, ask_valid, skew_on, fill_side;
+    reg        [10:0] msg_count;
+    reg        [7:0]  our_size, fill_qty;
+    reg        [15:0] fill_count;
+    reg        [5:0]  fill_px, reject;
+    reg        [29:0] entry_disp;
     wire [8:0] x;
     wire [7:0] y;
     wire [2:0] colour;
@@ -35,6 +43,10 @@ module dashboard_tb;
         .q_side(q_side), .q_level(q_level), .q_qty(q_qty),
         .our_bid_live(bid_live), .our_bid_px(bid_px), .our_ask_live(ask_live), .our_ask_px(ask_px),
         .position(position), .pnl(pnl),
+        .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
+        .msg_count(msg_count), .our_size(our_size), .skew_on(skew_on),
+        .fill_count(fill_count), .fill_side(fill_side), .fill_px(fill_px), .fill_qty(fill_qty),
+        .entry_disp(entry_disp), .reject(reject),
         .x(x), .y(y), .colour(colour), .plot(plot)
     );
 
@@ -63,18 +75,37 @@ module dashboard_tb;
             @(posedge clk);
             $sformat(name, "out/dash_%0d.hex", n);
             $writememh(name, VGA.fb);
-            $fdisplay(fcase, "%0d %0d %0d %0d %0d %0d %0d", n, b_live, b_px, a_live, a_px, pos, p);
+            $fdisplay(fcase, "%0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d",
+                      n, b_live, b_px, a_live, a_px, pos, p,
+                      best_bid, bid_valid, best_ask, ask_valid, msg_count, our_size, skew_on,
+                      fill_count, fill_side, fill_px, fill_qty, reject,
+                      entry_disp[29:25], entry_disp[24:20], entry_disp[19:15],
+                      entry_disp[14:10], entry_disp[9:5], entry_disp[4:0]);
         end
     endtask
 
     initial begin
         fcase = $fopen("out/dash_cases.txt", "w");
         bid_live = 0; ask_live = 0; bid_px = 0; ask_px = 0; position = 0; pnl = 0;
+        best_bid = 0; best_ask = 0; bid_valid = 0; ask_valid = 0; skew_on = 0; fill_side = 0;
+        msg_count = 0; our_size = 0; fill_qty = 0; fill_count = 0; fill_px = 0; reject = 0;
+        entry_disp = {6{5'd10}};
         repeat (2) @(posedge clk);
         resetn = 1;
         //       n  bid      ask      position  pnl
+        // panel case 0: two-sided book, skew on, no fills yet, keyboard idle, no rejects
+        best_bid = 6'd30; bid_valid = 1; best_ask = 6'd34; ask_valid = 1; msg_count = 11'd1234;
+        our_size = 8'd2; skew_on = 1; fill_count = 0; reject = 6'd0; entry_disp = {6{5'd10}};
         run_case(0, 1, 6'd30, 1, 6'd34, -10'sd37,  -24'sd123456);   // negative, |P&L| clamps to 99999
+        // panel case 1: no bids, a sell fill, typing "S P 14", KILL + SIDE + CROSS flags
+        best_bid = 6'd0; bid_valid = 0; best_ask = 6'd63; ask_valid = 1; msg_count = 11'd7;
+        our_size = 8'd8; skew_on = 0; fill_count = 16'd12; fill_side = 1; fill_px = 6'd63; fill_qty = 8'd3;
+        reject = 6'b100011; entry_disp = {5'd17, 5'd23, 5'd15, 5'd15, 5'd1, 5'd4};
         run_case(1, 0, 6'd0,  1, 6'd63,  10'sd5,    24'sd4321);     // bid pulled, ask at the top level
+        // panel case 2: clamps (2047 msgs, size 255 -> 9, 12345 fills -> 9999), a buy fill, "Err", all flags
+        best_bid = 6'd0; bid_valid = 1; best_ask = 6'd1; ask_valid = 1; msg_count = 11'd2047;
+        our_size = 8'd255; fill_count = 16'd12345; fill_side = 0; fill_px = 6'd0; fill_qty = 8'd255;
+        reject = 6'b111111; entry_disp = {5'd20, 5'd21, 5'd21, 5'd15, 5'd15, 5'd15};
         run_case(2, 1, 6'd0,  0, 6'd0,  -10'sd512,  24'sd0);        // -512 magnitude, zero P&L is "+"
         $fclose(fcase);
         $display("dashboard: %0d cases dumped", N_CASES);

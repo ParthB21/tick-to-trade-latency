@@ -20,8 +20,11 @@
 //   KEY[0]   reset
 //   KEY[1]   step: one market message per press (when SW[1:0] = 00)
 //   KEY[2]   HEX view: bot -> market -> bid depth -> ask depth -> entry -> fills -> bot ...
-//            (any keyboard key jumps to the entry view)
+//            (any keyboard key except the arrows jumps to the entry view)
 //   PS/2     order entry: B<price> <qty>Enter, S<price> <qty>Enter, X<id>Enter, T<id> <qty>Enter
+//   arrows   VGA cursor: off after reset; the first arrow starts it from the middle (level 32).
+//            up/down move to the next bar above/below;
+//            its bar turns white and the top-right corner shows its side, price and shares
 //   KEY[3]   data set: 1000-message market <-> 13-message hand-checkable test
 //            (switching restarts everything, like KEY[0]; starts on the market data)
 //   SW[1:0]  replay: 00 step with KEY[1], 01 auto 4 msgs/s, 1x full speed
@@ -172,6 +175,17 @@ module hft_top #(
         .disp(entry_disp), .state_out(entry_state)
     );
 
+    // ---------------- arrow-key book cursor (Pierce, M2): shown on the VGA ladder ----------------
+    localparam K_FIRST_ARROW = 5'd18;                  // kb_decoder: 18 = up, 19 = down
+    wire [5:0] cursor;
+    wire       cursor_active;
+    wire       arrow_key = (key_code >= K_FIRST_ARROW);
+    book_cursor u_cursor (
+        .clk(clk), .resetn(resetn), .key_valid(key_valid), .key_code(key_code),
+        .bid_mask(bid_mask), .ask_mask(ask_mask),
+        .cursor(cursor), .active(cursor_active)
+    );
+
     // ---------------- order arbiter (Parth, M2): ROM feed + keyboard -> book ----------------
     order_arbiter u_arb (
         .clk(clk), .resetn(resetn),
@@ -269,7 +283,7 @@ module hft_top #(
         .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
         .msg_count(msg_count), .our_size(our_size), .skew_on(sw[2]),
         .fill_count(fill_count), .fill_side(fill_side), .fill_px(fill_px), .fill_qty(fill_qty),
-        .entry_disp(entry_disp), .reject(reject),
+        .entry_disp(entry_disp), .reject(reject), .cursor(cursor), .cursor_active(cursor_active),
         .x(vga_x), .y(vga_y), .colour(vga_colour), .plot(vga_plot)
     );
 
@@ -308,7 +322,7 @@ module hft_top #(
 
     // ---------------- Parth's views (KEY[2] cycles; a keyboard key jumps to the entry view) ----------------
     always @(posedge clk) begin                        // not reset: view survives KEY[0]
-        if (key_valid)       view <= 3'd4;
+        if (key_valid && !arrow_key) view <= 3'd4;     // arrows only move the VGA cursor
         else if (view_press) view <= (view == 3'd5) ? 3'd0 : view + 3'd1;
     end
 

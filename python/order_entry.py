@@ -20,6 +20,8 @@ from msgfmt import ADD, CANCEL, TRADE, BID, ASK, pack
 
 # key codes used inside the hardware (kb_decoder.v -> order_entry.v)
 K_BUY, K_SELL, K_CANCEL, K_TRADE, K_SPACE, K_ENTER, K_ESC, K_BKSP = range(10, 18)
+K_UP, K_DOWN = 18, 19                                  # arrows: VGA book cursor, order entry ignores them
+EXT_CODES = {0x5A: K_ENTER, 0x75: K_UP, 0x72: K_DOWN}
 
 # PS/2 set-2 make codes
 DIGIT_CODES = [0x45, 0x16, 0x1E, 0x26, 0x25, 0x2E, 0x36, 0x3D, 0x3E, 0x46]   # top row 0..9
@@ -46,7 +48,7 @@ CHAR_CODES.update({"B": 0x32, "S": 0x1B, "A": 0x1C, "X": 0x22, "C": 0x21, "T": 0
 def scan_code_to_key(code, extended=False):
     """Same table as kb_decoder.v. Returns a key code or None (key ignored)."""
     if extended:
-        return K_ENTER if code == 0x5A else None
+        return EXT_CODES.get(code)
     if code in DIGIT_CODES:
         return DIGIT_CODES.index(code)
     if code in KEYPAD_CODES:
@@ -54,7 +56,7 @@ def scan_code_to_key(code, extended=False):
     return LETTER_CODES.get(code)
 
 
-# extended keys in test strings: '~' keypad Enter (E0 5A), '^' up arrow (E0 75, not used)
+# extended keys in test strings: '~' keypad Enter (E0 5A), '^' up arrow (E0 75, ignored by order entry)
 EXT_CHARS = {"~": 0x5A, "^": 0x75}
 
 

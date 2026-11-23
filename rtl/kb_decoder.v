@@ -4,7 +4,7 @@
 // A key press sends its make code (e.g. 32 for B). A release sends F0 then the
 // make code. Some keys (keypad Enter, arrows) send E0 first. So:
 //   F0      -> the next code is a release: ignore it
-//   E0      -> the next code is an extended key (only keypad Enter is used)
+//   E0      -> the next code is an extended key (keypad Enter, up and down arrows)
 //   other   -> a key press: look it up, pulse key_valid if it is a key we use
 // Holding a key down repeats its make code (typematic), which simply types it again.
 //
@@ -12,6 +12,7 @@
 //   0..9  digits (top row or keypad)
 //   10 B (buy)   11 S or A (sell / ask)   12 X or C (cancel)   13 T (trade)
 //   14 Space     15 Enter (either)        16 Esc               17 Backspace
+//   18 Up  19 Down  (arrows, M2 Pierce: VGA book cursor; order entry ignores them)
 module kb_decoder (
     input            clk,
     input            resetn,
@@ -21,14 +22,20 @@ module kb_decoder (
     output reg [4:0] key_code
 );
     localparam K_BUY = 5'd10, K_SELL = 5'd11, K_CANCEL = 5'd12, K_TRADE = 5'd13,
-               K_SPACE = 5'd14, K_ENTER = 5'd15, K_ESC = 5'd16, K_BKSP = 5'd17;
+               K_SPACE = 5'd14, K_ENTER = 5'd15, K_ESC = 5'd16, K_BKSP = 5'd17,
+               K_UP = 5'd18, K_DOWN = 5'd19;
 
     reg brk, ext;                        // last byte was F0 / E0
 
     // {known, code} for a make code
     function [5:0] lookup(input [7:0] sc, input e);
         begin
-            if (e) lookup = (sc == 8'h5A) ? {1'b1, K_ENTER} : 6'd0;   // keypad Enter only
+            if (e) case (sc)                                           // without E0 these are keypad digits
+                8'h5A:   lookup = {1'b1, K_ENTER};                         // keypad Enter
+                8'h75:   lookup = {1'b1, K_UP};
+                8'h72:   lookup = {1'b1, K_DOWN};
+                default: lookup = 6'd0;
+            endcase
             else case (sc)
                 8'h45, 8'h70: lookup = {1'b1, 5'd0};
                 8'h16, 8'h69: lookup = {1'b1, 5'd1};

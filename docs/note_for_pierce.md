@@ -1,53 +1,40 @@
-# Note for Pierce: fills, position and inventory skew (M2)
+# Note for Pierce: what changed when your M2 branch was merged with mine
 
-Hi Pierce. The matching engine is in `hft_top` now and produces fills. Here's what you need to know to hook up the P&L tracker, plus a suggestion for bringing up the skew safely. **I haven't changed `strategy.v` or `risk_gate.v`.**
+`feat/m2-trading` is merged into `feat/m2-market`. Your strategy, risk gate, P&L tracker, dashboard and their testbenches are unchanged. Everything passes after the merge (`sim\run_m2_checks.ps1`).
 
-## 1. Fill interface (from `rtl/matching_engine.v`, instance `u_match` in `hft_top`)
+## What I changed in your files, and why
 
-| Signal | Width | Meaning |
+| File | Change | Why |
 |---|---|---|
-| `fill_valid` | 1 | 1-cycle pulse, one cycle after the order book's `done` |
-| `fill_side` | 1 | 0 = we bought (our bid was hit), 1 = we sold (our ask was lifted) |
-| `fill_px` | 6 | our price (0..63) |
-| `fill_qty` | 8 | shares, at most `our_size` |
-| `fill_count` | 16 | fills since reset (HEX fills view) |
+| `rtl/hft_top.v` | Your placeholder fill wires (tied to 0) are now driven by `matching_engine` (`u_match`). | Connects fills to `pnl_tracker`. |
+| `tb/hft_top_tb.v` | `FRAMES_TO_WAIT` 2 → 3. | See "The frame-dump bug" below. |
+| `python/e2e.py` | Adds `MatchingEngine` to the chain, with the hardware's timing (below). The expected frame uses the settled P&L (`cash + position * mark`). | With real fills, position is no longer 0. |
+| `sim/run_hft_top.do`, `sim/run_all.sh` | Added my files to the `hft_top` file list. | So the scripts still compile. |
 
-Rule: a trade at or through our resting price fills us at our own price. Size is reloaded on every `order_valid`, so a single quote never fills more than its size.
+**Name clash:** we both wrote a module called `bin2bcd`. I kept yours (sequential, used by the dashboard) as `rtl/bin2bcd.v` and renamed mine (combinational, used by the HEX views) to `rtl/bin2bcd_comb.v`.
 
-## 2. Where `position` goes
+I took your `python/pnl.py` and `python/strategy.py` unchanged. My placeholder P&L model is gone.
 
-`hft_top.v` still has `wire signed [9:0] position = 10'sd0;`. Replace that line with your tracker's output. The risk gate already takes `position`.
+## Timing inside one message (the models now match this)
 
-**Timing:** `done` is cycle d. `fill_valid` is high in d+1. If your tracker registers the position at the end of d+1, it's valid in d+2. That's exactly the cycle the risk gate samples (`quote_valid` is high in d+2). So the risk check for a message uses the position *after* that message's fill, which is also what the Python model does (`python/system_model.py --feedback`). If your tracker needs an extra cycle, the risk gate sees the position from one message earlier. That's fine too, but tell me and I'll make the model match.
+| Cycle | What happens |
+|---|---|
+| d | The order book's `done`. Your strategy snapshots best bid/ask **and `position`**, which is the position *before* this message's fill. |
+| d+1 | `fill_valid` (matching engine). |
+| d+2 | `pnl_tracker` has the new position. The risk gate samples it while `quote_valid` is high, so the limits use the position *after* the fill. |
+| d+3 | `order_valid`. The matching engine reloads its remaining size. |
 
-## 3. Suggested bring-up: skew off first, then on
+So the skew lags one message behind, and the risk limits do not lag. Both `e2e.py` and `system_model.py` model this. All 1000 orders and every system-test row match the hardware.
 
-1. Add the skew as a parameter or switch (e.g. `SKEW_K`) and set it to 0 first. Close the fill → position → risk loop with no skew. The strategy is then exactly M1, so any mismatch is in the P&L/position path, not the strategy.
-   - Check: `python ../python/system_model.py ../mem/market_data.hex kb_script.txt sys_expected.txt --feedback --skew-k 0`
-     against `tb/hft_system_tb.v` (define `HAS_PNL` and point the `$fdisplay` at your `position` and `cash` signals). Then run `python ../python/sys_compare.py sys_expected.txt sys_out.txt`.
-2. Then turn the skew on and run the same comparison with `--skew-k <K>`.
+## The frame-dump bug
 
-`python/strategy.py` now takes optional `position` and `skew_k` arguments (default 0, so your M1 vectors and `e2e.py` give identical results). The formula I used is only a proposal. If yours differs, change `skew_ticks()` to match your hardware:
+`hft_top_tb` counts a frame when the ladder ends (row 191). Your dashboard draws the position/P&L text below that, using values latched at the frame's start. With 2 frames, the dumped text was latched before the feed ended (+000 / +00000), while the model expected the final values (+001 / +00056). It passed on your branch only because position was always 0 there. With 3 frames it passes: 76,800/76,800 pixels.
 
-```
-skew   = (position * skew_k) >>> 3        // arithmetic shift; floor for negative positions
-bid_px = clamp(floor(mid) - half_spread - skew)
-ask_px = clamp(ceil(mid)  + half_spread - skew)   // long -> both quotes move down
-```
+## Results after the merge (half-spread 1, size 2, max position 8, plus the keyboard script)
 
-What the model shows on the 1000-message data plus the keyboard script (half-spread 1, size 2, max position 8):
+| SW[2] skew | Fills | Final position | Cash | P&L |
+|---|---|---|---|---|
+| off | 34 | +5 | -97 | +28 |
+| on (SKEW_K = 2) | 42 | +1 | +25 | +50 |
 
-| Setting | Fills | Final position | Cash (ticks x shares) |
-|---|---|---|---|
-| no position feedback (hardware today) | 39 | +15 | -403 |
-| feedback, skew 0 | 34 | +5 | -97 |
-| feedback, skew_k 4 | 42 | 0 | +46 |
-
-## 4. P&L model
-
-`python/pnl.py` is a placeholder I wrote so the system model has position and cash columns. It's your block: make it match `pnl_tracker.v` exactly (widths, saturation, when it updates) and keep the interface: `on_fill(side, px, qty)`, `position`, `cash`.
-
-## 5. Two other things
-
-- `seg7.v` is now 5 bits wide (letters for the new views). In ModelSim a 4-bit connection leaves the top bit as `z` (blank digit), so pad it: `.d({1'b0, x})`. I've already done this in `hft_top_tb.v`.
-- `tb/mocks/vga_adapter.v` now uses the newer adapter's ports (`COLOR_DEPTH`, `.color`, `.write`), so `hft_top_tb` runs again. Your e2e still passes: 1000/1000 orders, 76,800/76,800 pixels.
+Your e2e at full speed with skew on: 1000/1000 orders, 0 pixel mismatches, final position +1, P&L +56.

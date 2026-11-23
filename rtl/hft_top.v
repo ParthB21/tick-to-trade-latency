@@ -2,12 +2,15 @@
 // Board top:
 //   ROM -> feed handler ---\
 //                           order arbiter -> order book -> strategy -> risk gate
-//   PS/2 -> order entry ---/                     |                       | our quotes
+//   PS/2 -> order entry ---/                     |            ^          | our quotes
 //                                                +-> matching engine <---+
-//                                                       | fills (-> Pierce's P&L tracker)
-// with the live book and our quotes on VGA (dashboard) and risk status on the LEDs.
+//                                                       | fills          | position
+//                                                       +-> P&L tracker -+ (also skew)
+// The live book, our quotes, position and P&L are on VGA (dashboard), risk status on the LEDs.
 // M2 (Parth): order arbiter, PS/2 order entry, matching engine, entry + fills HEX views,
-// HEX digits through bin2bcd instead of / and %.
+// HEX digits through bin2bcd_comb instead of / and %.
+// M2 (Pierce): P&L tracker feeding position back to the strategy (skew) and the risk gate
+// (limits), position and P&L text on VGA.
 //
 // vga_adapter is the course-provided VGA core (vga_adapter.v, vga_controller.v,
 // vga_address_translator.v, vga_pll.v), used unmodified, with a black 320x240
@@ -22,6 +25,7 @@
 //   KEY[3]   data set: 1000-message market <-> 13-message hand-checkable test
 //            (switching restarts everything, like KEY[0]; starts on the market data)
 //   SW[1:0]  replay: 00 step with KEY[1], 01 auto 4 msgs/s, 1x full speed
+//   SW[2]    inventory skew on: quotes shift 1 tick per 4 shares held
 //   SW[4:3]  quote size per side: 1 / 2 / 4 / 8
 //   SW[6:5]  half-spread: 0..3 ticks either side of the mid
 //   SW[8:7]  max |position|: 4 / 8 / 16 / 32
@@ -43,7 +47,8 @@ module hft_top #(
     parameter AUTO_DIV   = 12_500_000,               // 0.25 s at 50 MHz
     parameter MARKET_HEX = "../mem/market_data.hex", // relative to the Quartus project folder
     parameter SMALL_HEX  = "../mem/test_small.hex",  // 13-message hand-checkable test
-    parameter MAX_SIZE   = 8
+    parameter MAX_SIZE   = 8,
+    parameter SKEW_K     = 2                         // skew = position * SKEW_K / 8 ticks
 ) (
     input        CLOCK_50,
     input  [3:0] KEY,
@@ -197,17 +202,29 @@ module hft_top #(
     wire [7:0] quote_size;
     wire [7:0] size    = 8'd1 << sw[4:3];
     wire [8:0] max_pos = BASE_MAX_POS << sw[8:7];
+    wire [2:0] skew_k  = sw[2] ? SKEW_K[2:0] : 3'd0;
+    wire signed [9:0]  position;
+    wire signed [23:0] pnl;
 
     strategy u_strategy (
         .clk(clk), .resetn(resetn), .trigger(book_done),
         .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
-        .half_spread(sw[6:5]), .size(size),
+        .half_spread(sw[6:5]), .size(size), .position(position), .skew_k(skew_k),
         .quote_valid(quote_valid), .quote_ok(quote_ok),
         .quote_bid_px(quote_bid_px), .quote_ask_px(quote_ask_px), .quote_size(quote_size)
     );
 
-    // Flat until Pierce's P&L tracker turns the matching engine's fills into a position (M2).
-    wire signed [9:0] position = 10'sd0;
+    // Fills come from the matching engine (Parth, below).
+    wire       fill_valid, fill_side;   // fill_side 0 = our bid hit (bought), 1 = our ask lifted (sold)
+    wire [5:0] fill_px;
+    wire [7:0] fill_qty;
+
+    pnl_tracker u_pnl (
+        .clk(clk), .resetn(resetn),
+        .fill_valid(fill_valid), .fill_side(fill_side), .fill_px(fill_px), .fill_qty(fill_qty),
+        .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
+        .position(position), .pnl(pnl)
+    );
 
     wire       order_valid, our_bid_live, our_ask_live, killed;
     wire [5:0] our_bid_px, our_ask_px, reject;
@@ -225,9 +242,7 @@ module hft_top #(
     );
 
     // ---------------- matching engine (Parth, M2): fills for our quotes ----------------
-    wire        fill_valid, fill_side;
-    wire [5:0]  fill_px;
-    wire [7:0]  fill_qty, bid_rem, ask_rem;
+    wire [7:0]  bid_rem, ask_rem;           // fill_* are declared above, at the P&L tracker
     wire [15:0] fill_count;
 
     matching_engine u_match (
@@ -250,6 +265,7 @@ module hft_top #(
         .q_side(q_side), .q_level(q_level), .q_qty(q_qty),
         .our_bid_live(our_bid_live), .our_bid_px(our_bid_px),
         .our_ask_live(our_ask_live), .our_ask_px(our_ask_px),
+        .position(position), .pnl(pnl),
         .x(vga_x), .y(vga_y), .colour(vga_colour), .plot(vga_plot)
     );
 
@@ -296,9 +312,9 @@ module hft_top #(
     wire [9:0]  mkt_bid = bid_valid ? two(to_decimal(best_bid)) : DASH2;
     wire [9:0]  mkt_ask = ask_valid ? two(to_decimal(best_ask)) : DASH2;
     wire [19:0] cnt_bcd, qty_bcd, fills_bcd;
-    bin2bcd u_cnt   (.bin({3'd0, msg_count}), .bcd(cnt_bcd));       // shift-and-add-3, no divider
-    bin2bcd u_qty   (.bin({1'b0, depth_qty}), .bcd(qty_bcd));
-    bin2bcd u_fills (.bin(fill_count[13:0]),  .bcd(fills_bcd));
+    bin2bcd_comb u_cnt   (.bin({3'd0, msg_count}), .bcd(cnt_bcd));       // shift-and-add-3, no divider
+    bin2bcd_comb u_qty   (.bin({1'b0, depth_qty}), .bcd(qty_bcd));
+    bin2bcd_comb u_fills (.bin(fill_count[13:0]),  .bcd(fills_bcd));
 
     reg [29:0] codes;                                  // HEX5..HEX0, 5 bits each
     always @* begin

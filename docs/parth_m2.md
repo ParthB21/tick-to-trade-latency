@@ -18,10 +18,11 @@ They use Humor Sans if it's installed, as in M1, and Comic Sans otherwise.
 | Order arbiter (`order_arbiter_tb`) | 6/6: same-cycle, keyboard while busy, back-to-back, 360-message stress; 371 sent = 371 received, 0 misrouted `done` |
 | Keyboard path (`order_entry_tb`) | 10/10: 12/12 messages vs `order_entry.py`, 9/9 rejects, bad-parity frame dropped, 7 display checks |
 | Pierce's e2e (`hft_top_tb` + `e2e.py`) | 1000/1000 orders, 76,800/76,800 pixels, tick-to-trade still 7 to 8 cycles |
-| System (`hft_system_tb` vs `system_model.py`), half-spread 1 | 1010/1010 messages (1000 ROM + 10 keyboard), 39 fills, 3 keyboard rejects |
-| System, half-spread 0 | 1010/1010, 203 fills |
+| System (`hft_system_tb` vs `system_model.py`, with Pierce's P&L), half-spread 1 | 1010/1010 messages (1000 ROM + 10 keyboard), 34 fills, 3 keyboard rejects; position, cash and P&L match on every message |
+| System, half-spread 0 | 1010/1010, 186 fills |
+| System, half-spread 1, skew on (SW[2]) | 1010/1010, 42 fills |
 | Board demo sequence (13-message test + keyboard) | 17/17 messages, 3 fills |
-| Quartus (`hft_top`) | 0 errors, Fmax 84.25 MHz, setup slack +8.13 ns, hold slack +0.17 ns, 1,006 ALMs (3%), 311,168 block-memory bits (8%) |
+| Quartus (`hft_top`, merged with Pierce's M2) | 0 errors, Fmax 84.03 MHz, setup slack +8.06 ns, hold slack +0.17 ns, 1,248 ALMs (4%), 311,168 block-memory bits (8%) |
 
 Run all of them: `cd sim` then `.\run_m2_checks.ps1`.
 
@@ -235,7 +236,7 @@ One Python model per block, each with the same interface as its Verilog, plus th
 | risk gate (Pierce) | `risk.py` | `risk_gate_tb` |
 | matching engine | `matching.py` | `matching_engine_tb` (`gen_match_vectors.py`) |
 | keyboard decode + entry | `order_entry.py` | `order_entry_tb` (`gen_entry_vectors.py`) |
-| P&L (Pierce) | `pnl.py`: **placeholder** until Pierce's tracker exists | — |
+| P&L (Pierce) | `pnl.py` (Pierce's) | `pnl_tracker_tb` |
 | **whole system** | `system_model.py` chains all of the above | `hft_system_tb` + `sys_compare.py` |
 
 **`system_model.py`** replays the ROM plus a keyboard script (`sim/kb_script.txt`: `<after_n> <keys>`). For every message the book processes, it writes:
@@ -246,7 +247,7 @@ One Python model per block, each with the same interface as its Verilog, plus th
 
 **`hft_system_tb.v`** steps the real `hft_top` with KEY[1] and types the same script as real PS/2 frames on the `PS2_CLK`/`PS2_DAT` pins. It logs the same columns from `hft_top`'s internal signals (`book_done`, `arb_owner`, `fill_*`, `order_valid`, `our_*`). `sys_compare.py` compares them column by column.
 
-Position/cash show `na` until Pierce's P&L tracker is in `hft_top`. Define `HAS_PNL` in the testbench then.
+Position, cash and P&L come from Pierce's `pnl_tracker` (`u_pnl`) and are checked on every message too. The strategy's skew uses the position before a message's fill; the risk gate uses the position after it (the same timing as the hardware).
 
 The keyboard script covers:
 - adds, cancels, a keyboard trade that fills our ask
@@ -272,8 +273,8 @@ The keyboard script covers:
   | HEX2–0 | number of fills |
   | before any fill | `F-----` |
 
-- **No `/` or `%`.** HEX digits now go through `bin2bcd.v` (shift-and-add-3). `seg7.v` is 5 bits wide, with letters.
-- **`position` still tied to 0.** It waits for Pierce's P&L tracker (see `docs/note_for_pierce.md`).
+- **No `/` or `%`.** HEX digits now go through `bin2bcd_comb.v` (shift-and-add-3; renamed from `bin2bcd.v` at the merge, since Pierce's sequential `bin2bcd.v` drives the VGA text). `seg7.v` is 5 bits wide, with letters.
+- **Fills drive Pierce's P&L tracker.** Its position goes back to the strategy (skew, SW[2]) and the risk gate (limits). Merge notes: `docs/note_for_pierce.md`.
 
 ## 7. Files (new or changed in M2)
 
@@ -284,14 +285,14 @@ The keyboard script covers:
 | `rtl/ps2_rx.v` | new: PS/2 receiver (our own) |
 | `rtl/kb_decoder.v` | new: scan codes → keys |
 | `rtl/order_entry.v` | new: keys → 32-bit messages, entry display |
-| `rtl/bin2bcd.v` | new: binary → BCD for the HEX displays |
+| `rtl/bin2bcd_comb.v` | new: binary → BCD for the HEX displays |
 | `rtl/order_book.v` | changed: 11-bit ID (source bit), 2048-entry order table |
 | `rtl/seg7.v` | changed: 5-bit input, letters |
 | `rtl/hft_top.v` | changed: integration, new views |
 | `rtl/milestone1_top.v` | changed: pads the ID and `seg7` inputs (still compiles) |
 | `tb/matching_engine_tb.v`, `tb/order_arbiter_tb.v`, `tb/order_entry_tb.v`, `tb/hft_system_tb.v` | new testbenches |
 | `tb/order_book_tb.v`, `tb/feed_book_tb.v`, `tb/hft_top_tb.v`, `tb/mocks/vga_adapter.v` | updated for the changes above |
-| `python/matching.py`, `order_entry.py`, `pnl.py`, `system_model.py`, `sys_compare.py`, `gen_match_vectors.py`, `gen_entry_vectors.py`, `demo_table.py` | new models and tools (testing only) |
+| `python/matching.py`, `order_entry.py`, `system_model.py`, `sys_compare.py`, `gen_match_vectors.py`, `gen_entry_vectors.py`, `demo_table.py` | new models and tools (testing only) |
 | `python/strategy.py`, `python/ref_model.py` | optional skew / source bit added |
 | `sim/run_matching_engine.do`, `run_order_arbiter.do`, `run_order_entry.do`, `run_system.do`, `run_m2_checks.ps1` | new scripts |
 | `sim/kb_script.txt`, `sim/kb_demo_small.txt` | keyboard scripts (system test, board demo) |
@@ -306,5 +307,4 @@ The keyboard script covers:
 ## 9. Next (week 12)
 
 - Latency counter on the HEX displays (`msg_start` → `order_valid`; currently 7 to 8 cycles).
-- Connect fills to Pierce's P&L tracker and close the position → risk loop, with skew off first.
-- An end-to-end run with `--feedback`.
+- Board test of the merged design (P&L text on VGA with real fills).

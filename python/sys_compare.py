@@ -2,14 +2,14 @@
 Compare the system testbench log (tb/hft_system_tb.v) with the system model
 (python/system_model.py), line by line, column by column.
 
-Columns: seq src idx best_bid best_ask bid_live bid_px ask_live ask_px fside fpx fqty position cash
+Columns: seq src idx best_bid best_ask bid_live bid_px ask_live ask_px fside fpx fqty position cash pnl
 "na" in the hardware log (no P&L tracker in hft_top yet) skips that column.
 
 Usage:  python sys_compare.py ../sim/sys_expected.txt ../sim/sys_out.txt
 """
 import sys
 
-COLS = "seq src idx best_bid best_ask bid_live bid_px ask_live ask_px fside fpx fqty position cash".split()
+COLS = "seq src idx best_bid best_ask bid_live bid_px ask_live ask_px fside fpx fqty position cash pnl".split()
 MAX_REPORT = 10
 
 

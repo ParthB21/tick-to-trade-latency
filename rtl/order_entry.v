@@ -141,7 +141,7 @@ module order_entry (
 
     // ---------------- display ----------------
     wire [19:0] id_bcd;
-    bin2bcd u_id (.bin({4'd0, last_id}), .bcd(id_bcd));
+    bin2bcd_comb u_id (.bin({4'd0, last_id}), .bcd(id_bcd));
 
     wire [4:0] letter = (mode == M_BUY) ? C_b : (mode == M_SELL) ? C_S : (mode == M_CANCEL) ? C_C : C_t;
     wire [4:0] field  = (state == S_NUM2) ? C_q : (is_add ? C_P : C_d);

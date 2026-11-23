@@ -1,23 +1,42 @@
-// bin2bcd.v  (Parth, M2)
-// Binary (0..16383) to 5 BCD digits with the shift-and-add-3 ("double dabble")
-// method: shift the binary number in one bit at a time; before each shift, any
-// BCD digit that is 5 or more gets 3 added so it carries correctly into the next
-// digit. Purely combinational (14 rows of small adders), no divider.
-// Replaces the / 10 and % 10 the M1 HEX code used.
-//   bcd[3:0] ones, [7:4] tens, [11:8] hundreds, [15:12] thousands, [19:16] ten-thousands
-module bin2bcd (
-    input      [13:0] bin,
-    output reg [19:0] bcd
+// bin2bcd.v  (Pierce)
+// Sequential binary to BCD (shift-and-add-3, one bit per clock, no divider).
+// A start pulse loads value; BITS cycles later bcd holds its decimal digits.
+// bcd keeps the previous result while a conversion runs, so a reader never sees
+// half-converted digits. value must be < 10^DIGITS (the caller clamps it).
+module bin2bcd #(
+    parameter BITS   = 17,
+    parameter DIGITS = 5
+) (
+    input                         clk,
+    input                         resetn,
+    input                         start,
+    input      [BITS-1:0]         value,
+    output reg [4*DIGITS-1:0]     bcd
 );
-    integer i;
+    localparam COUNT_W = $clog2(BITS + 1);
+
+    reg [BITS-1:0]     bin;
+    reg [4*DIGITS-1:0] acc, adj;
+    reg [COUNT_W-1:0]  count;
+    integer d;
+
+    // add 3 to every digit >= 5 so the next shift carries into the digit above
     always @* begin
-        bcd = 20'd0;
-        for (i = 13; i >= 0; i = i - 1) begin
-            if (bcd[3:0]   >= 4'd5) bcd[3:0]   = bcd[3:0]   + 4'd3;
-            if (bcd[7:4]   >= 4'd5) bcd[7:4]   = bcd[7:4]   + 4'd3;
-            if (bcd[11:8]  >= 4'd5) bcd[11:8]  = bcd[11:8]  + 4'd3;
-            if (bcd[15:12] >= 4'd5) bcd[15:12] = bcd[15:12] + 4'd3;
-            bcd = {bcd[18:0], bin[i]};
+        adj = acc;
+        for (d = 0; d < DIGITS; d = d + 1)
+            if (acc[4*d +: 4] >= 4'd5) adj[4*d +: 4] = acc[4*d +: 4] + 4'd3;
+    end
+
+    always @(posedge clk) begin
+        if (!resetn) begin
+            bin <= {BITS{1'b0}}; acc <= {4*DIGITS{1'b0}}; count <= {COUNT_W{1'b0}};
+            bcd <= {4*DIGITS{1'b0}};
+        end else if (start) begin
+            bin <= value; acc <= {4*DIGITS{1'b0}}; count <= BITS;
+        end else if (count != {COUNT_W{1'b0}}) begin
+            {acc, bin} <= {adj, bin} << 1;
+            count <= count - 1'b1;
+            if (count == 1) bcd <= {adj[4*DIGITS-2:0], bin[BITS-1]};
         end
     end
 endmodule

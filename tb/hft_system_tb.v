@@ -8,18 +8,19 @@
 //
 // For every message the order book processes (ROM or keyboard) it writes one line to
 // OUT_FILE, read from hft_top's internal signals:
-//   seq src idx best_bid best_ask bid_live bid_px ask_live ask_px fside fpx fqty position cash
-// (same columns as the model; position/cash are "na" until Pierce's P&L tracker is in
-//  hft_top: define HAS_PNL and set the two signal names below when it is).
+//   seq src idx best_bid best_ask bid_live bid_px ask_live ask_px fside fpx fqty position cash pnl
+// (same columns as the model; position/cash/pnl come from Pierce's P&L tracker u_pnl).
 // Then:  python ../python/sys_compare.py sys_expected.txt sys_out.txt
 //
-// Switches: SW[6:5] = HS (half-spread, parameter), size 2, max position 8, kill off.
+// Switches: SW[6:5] = HS (half-spread), SW[2] = SKEW (inventory skew on, SKEW_K = 2),
+// size 2, max position 8, kill off.
 `timescale 1ns/1ps
 module hft_system_tb;
     parameter MARKET_HEX = "../mem/market_data.hex";
     parameter KB_HEX     = "vectors/sys_kb.hex";
     parameter OUT_FILE   = "sys_out.txt";
     parameter HS         = 1;
+    parameter SKEW       = 0;                     // SW[2]
     parameter PS2_HALF   = 2000;                  // ns; a real keyboard is 30-50 us
 
     reg clk = 0;
@@ -60,15 +61,9 @@ module hft_system_tb;
         if (dut.order_valid && !dut.killed) begin // done + 3: the risk gate's new quotes
             bb = dut.bid_valid ? dut.best_bid : -1;
             ba = dut.ask_valid ? dut.best_ask : -1;
-`ifdef HAS_PNL
-            $fdisplay(fout, "%0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d", seq, src, idx, bb, ba,
+            $fdisplay(fout, "%0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d", seq, src, idx, bb, ba,
                       dut.our_bid_live, dut.our_bid_px, dut.our_ask_live, dut.our_ask_px,
-                      fside, fpx, fqty, dut.position, dut.cash);
-`else
-            $fdisplay(fout, "%0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d na na", seq, src, idx, bb, ba,
-                      dut.our_bid_live, dut.our_bid_px, dut.our_ask_live, dut.our_ask_px,
-                      fside, fpx, fqty);
-`endif
+                      fside, fpx, fqty, dut.position, dut.u_pnl.cash, dut.pnl);
             seq = seq + 1;
             if (src) begin kb_rows = kb_rows + 1; keyboard_msgs = keyboard_msgs + 1; end
         end
@@ -118,7 +113,7 @@ module hft_system_tb;
         $readmemh(KB_HEX, kb);
         fout = $fopen(OUT_FILE, "w");
         //     kill max_pos 8  hs        size 2  -     step mode
-        SW = {1'b0, 2'b01, HS[1:0], 2'b01, 1'b0, 2'b00};
+        SW = {1'b0, 2'b01, HS[1:0], 2'b01, SKEW[0], 2'b00};
         KEY[0] = 0;
         repeat (5) @(posedge clk);
         KEY[0] = 1;

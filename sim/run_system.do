@@ -5,9 +5,10 @@
 # Then:  python ../python/sys_compare.py sys_expected.txt sys_out.txt
 vlib work
 vlog ../rtl/market_rom.v ../rtl/feed_handler.v ../rtl/prio_enc64.v ../rtl/order_book.v ../rtl/seg7.v \
-     ../rtl/sync2.v ../rtl/strategy.v ../rtl/risk_gate.v ../rtl/dashboard.v \
+     ../rtl/sync2.v ../rtl/strategy.v ../rtl/risk_gate.v ../rtl/pnl_tracker.v \
+     ../rtl/font_rom.v ../rtl/bin2bcd.v ../rtl/dashboard.v \
      ../rtl/order_arbiter.v ../rtl/matching_engine.v ../rtl/ps2_rx.v ../rtl/kb_decoder.v \
-     ../rtl/bin2bcd.v ../rtl/order_entry.v ../rtl/hft_top.v \
+     ../rtl/bin2bcd_comb.v ../rtl/order_entry.v ../rtl/hft_top.v \
      ../tb/mocks/vga_adapter.v ../tb/hft_system_tb.v
 vsim work.hft_system_tb
 add wave /hft_system_tb/clk /hft_system_tb/KEY /hft_system_tb/ps2_clk /hft_system_tb/ps2_dat

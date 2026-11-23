@@ -1,7 +1,7 @@
 # ModelSim: keyboard path on its own: PS/2 frames -> ps2_rx -> kb_decoder -> order_entry
 # Regenerate vectors first if needed:  python ../python/gen_entry_vectors.py
 vlib work
-vlog ../rtl/ps2_rx.v ../rtl/kb_decoder.v ../rtl/bin2bcd.v ../rtl/order_entry.v ../tb/order_entry_tb.v
+vlog ../rtl/ps2_rx.v ../rtl/kb_decoder.v ../rtl/bin2bcd_comb.v ../rtl/order_entry.v ../tb/order_entry_tb.v
 vsim work.order_entry_tb
 add wave -divider "PS/2 pins"
 add wave /order_entry_tb/ps2_clk /order_entry_tb/ps2_dat

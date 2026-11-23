@@ -1,12 +1,13 @@
 """
 Reference model of risk_gate.v (Pierce). One call = one clock edge.
 
-Reject flag bits (sticky until reset):
+Reject flag bits (sticky until reset, except 1, which shows only the latest quote):
   0 kill   1 quote not ok   2 size > max_size   3 long limit   4 short limit   5 crossing
 """
 from dataclasses import dataclass, replace
 
 KILL, NOT_OK, SIZE, LONG, SHORT, CROSS = (1 << b for b in range(6))
+LIVE = NOT_OK                     # flags that follow the latest quote instead of latching
 
 
 @dataclass(frozen=True)
@@ -46,4 +47,4 @@ def risk_step(st, kill_sw, quote, top, position, max_pos, max_size):
              | (LONG if long_bad else 0) | (SHORT if short_bad else 0)
              | (CROSS if bid_cross or ask_cross else 0))
     return replace(st, order_valid=True, bid_live=bid_ok, bid_px=bid_px, ask_live=ask_ok,
-                   ask_px=ask_px, size=size, reject=st.reject | flags)
+                   ask_px=ask_px, size=size, reject=((st.reject | flags) & ~LIVE) | (flags & LIVE))

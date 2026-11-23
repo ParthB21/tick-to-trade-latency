@@ -23,7 +23,7 @@
 //   2        : POS sddd PNL sddddd FILLS ffff LAST SELL qqq AT pp
 //              POS white; PNL green (>= 0) / red (< 0); fills cyan
 //   3        : KEYS c f dddd  RISK OK / KILL SIDE SIZE LONG SHORT CROSS
-//              keys white (red on ERR); risk green when OK, red with the sticky reject flags
+//              keys white (red on ERR); risk green when OK, red with the reject flags (SIDE live, the rest sticky)
 // Every number is converted with bin2bcd (sequential, started at the frame start).
 //
 // The FSM never erases: it repaints every pixel (bar/text colour or black)
@@ -67,7 +67,7 @@ module dashboard (
     input      [5:0]  fill_px,
     input      [7:0]  fill_qty,
     input      [29:0] entry_disp,        // order entry display codes (seg7 codes, HEX5 first)
-    input      [5:0]  reject,            // risk gate sticky reject flags
+    input      [5:0]  reject,            // risk gate reject flags (bit 1 live, the rest sticky)
     input      [5:0]  cursor,            // arrow-key cursor level (book_cursor)
     input             cursor_active,     // 0 = cursor off: no white bar, blank readout
 

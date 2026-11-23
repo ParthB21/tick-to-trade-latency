@@ -11,7 +11,8 @@
 //   4 position - size < -max_pos   : ask only  (selling would breach the short limit)
 //   5 crossing the market          : the offending side (bid >= best ask / ask <= best bid)
 // A rejected side goes not-live, so a stale quote is never left resting.
-// Reject flags are sticky until reset (shown on LEDR[5:0]).
+// Reject flags are sticky until reset (shown on LEDR[5:0]), except bit 1: a one-sided book
+// is not a violation, so it shows only the latest quote (every replay starts one-sided).
 //
 // Kill: the first cycle kill_sw is high, killed latches, both sides go
 // not-live and order_valid pulses (the cancel). Only reset clears killed.
@@ -49,6 +50,7 @@ module risk_gate (
     output reg [5:0]  reject
 );
     localparam B_KILL = 0, B_NOT_OK = 1, B_SIZE = 2, B_LONG = 3, B_SHORT = 4, B_CROSS = 5;
+    localparam [5:0] LIVE = 6'b000010;      // flags that follow the latest quote instead of latching
 
     // ---------------- checks (11-bit signed: +-511 +- 255 never overflows) ----------------
     wire signed [10:0] pos      = position;
@@ -94,7 +96,7 @@ module risk_gate (
                 our_ask_live <= ask_ok;  our_ask_px <= quote_ask_px;
                 our_size     <= quote_size;
                 order_valid  <= 1'b1;
-                reject       <= reject | flags;
+                reject       <= ((reject | flags) & ~LIVE) | (flags & LIVE);
             end
         end
     end

@@ -1,6 +1,13 @@
 // hft_top.v  (Pierce, using Parth's market-side modules)
-// Milestone 1 board top: ROM -> feed handler -> order book -> strategy -> risk gate,
+// Board top:
+//   ROM -> feed handler ---\
+//                           order arbiter -> order book -> strategy -> risk gate
+//   PS/2 -> order entry ---/                     |                       | our quotes
+//                                                +-> matching engine <---+
+//                                                       | fills (-> Pierce's P&L tracker)
 // with the live book and our quotes on VGA (dashboard) and risk status on the LEDs.
+// M2 (Parth): order arbiter, PS/2 order entry, matching engine, entry + fills HEX views,
+// HEX digits through bin2bcd instead of / and %.
 //
 // vga_adapter is the course-provided VGA core (vga_adapter.v, vga_controller.v,
 // vga_address_translator.v, vga_pll.v), used unmodified, with a black 320x240
@@ -9,7 +16,9 @@
 // Controls
 //   KEY[0]   reset
 //   KEY[1]   step: one market message per press (when SW[1:0] = 00)
-//   KEY[2]   HEX view: bot -> market -> bid depth -> ask depth -> bot ...
+//   KEY[2]   HEX view: bot -> market -> bid depth -> ask depth -> entry -> fills -> bot ...
+//            (any keyboard key jumps to the entry view)
+//   PS/2     order entry: B<price> <qty>Enter, S<price> <qty>Enter, X<id>Enter, T<id> <qty>Enter
 //   KEY[3]   data set: 1000-message market <-> 13-message hand-checkable test
 //            (switching restarts everything, like KEY[0]; starts on the market data)
 //   SW[1:0]  replay: 00 step with KEY[1], 01 auto 4 msgs/s, 1x full speed
@@ -23,6 +32,10 @@
 //                   HEX1-0 messages processed (last 2 digits)
 //   bid depth view: HEX5-4 best bid price, HEX3-0 total shares at the best bid
 //   ask depth view: HEX5-4 best ask price, HEX3-0 total shares at the best ask
+//   entry view    : what is being typed (b/S/C/t, then P price / q qty / d id, digits),
+//                   "b d 0007" = sent, order ID 7;  "Err" = rejected
+//   fills view    : HEX5 b (we bought) / S (we sold) for the last fill, HEX4-3 its price,
+//                   HEX2-0 number of fills (last 3 digits);  "F-----" = no fills yet
 //   LEDR[9] killed   LEDR[8] feed finished   LEDR[7] ask live   LEDR[6] bid live
 //   LEDR[5:0] sticky reject flags: 5 cross, 4 short limit, 3 long limit,
 //             2 size, 1 quote not ok (book one-sided), 0 kill
@@ -38,10 +51,11 @@ module hft_top #(
     output [6:0] HEX0, HEX1, HEX2, HEX3, HEX4, HEX5,
     output [9:0] LEDR,
     output [7:0] VGA_R, VGA_G, VGA_B,
-    output       VGA_HS, VGA_VS, VGA_BLANK_N, VGA_SYNC_N, VGA_CLK
+    output       VGA_HS, VGA_VS, VGA_BLANK_N, VGA_SYNC_N, VGA_CLK,
+    input        PS2_CLK,                            // keyboard (receive only, never driven)
+    input        PS2_DAT
 );
     localparam BASE_MAX_POS = 9'd4;
-    localparam DIGIT_DASH   = 4'd10, DIGIT_BLANK = 4'd15;
 
     wire clk = CLOCK_50;
 
@@ -104,6 +118,12 @@ module hft_top #(
     wire [1:0]  msg_type;
     wire [5:0]  msg_price, best_bid, best_ask, trade_price;
     wire [9:0]  msg_id;
+    wire        f_ready, f_done, k_valid, k_ready, k_done, arb_valid, arb_side, arb_owner;
+    wire [31:0] k_msg;
+    wire [1:0]  arb_type, arb_state;
+    wire [5:0]  arb_price;
+    wire [10:0] arb_id;
+    wire [12:0] arb_qty;
     wire [12:0] msg_qty, q_qty, trade_qty;
     wire [10:0] msg_count;
     wire        bid_valid, ask_valid, trade_valid, trade_side;
@@ -111,8 +131,9 @@ module hft_top #(
     wire [2:0]  feed_state, book_state;
     wire        q_side;
     wire [5:0]  q_level;
-    reg  [1:0]  view = 2'd0;                           // 0 bot, 1 market, 2 bid depth, 3 ask depth
-    wire        depth_side  = (view == 2'd3);          // 0 = bid, 1 = ask
+    reg  [2:0]  view = 3'd0;                           // 0 bot, 1 market, 2 bid depth, 3 ask depth,
+                                                       // 4 entry, 5 fills
+    wire        depth_side  = (view == 3'd3);          // 0 = bid, 1 = ask
     wire [5:0]  depth_level = depth_side ? best_ask : best_bid;
     wire [12:0] depth_qty;
 
@@ -121,14 +142,46 @@ module hft_top #(
         .rom_addr(rom_addr), .rom_q(rom_q),
         .msg_valid(msg_valid), .msg_type(msg_type), .msg_side(msg_side), .msg_price(msg_price),
         .msg_id(msg_id), .msg_qty(msg_qty),
-        .book_ready(book_ready), .book_done(book_done),
+        .book_ready(f_ready), .book_done(f_done),        // through the arbiter (M2)
         .msg_start(msg_start), .feed_end(feed_end), .msg_count(msg_count), .state_out(feed_state)
+    );
+
+    // ---------------- keyboard order entry (Parth, M2) ----------------
+    wire [7:0]  kb_byte;
+    wire        kb_byte_valid, kb_frame_err, key_valid;
+    wire [4:0]  key_code;
+    wire [9:0]  kb_next_id;
+    wire [15:0] kb_sent, kb_errs;
+    wire [29:0] entry_disp;
+    wire [1:0]  entry_state;
+
+    ps2_rx u_ps2 (.clk(clk), .resetn(resetn), .ps2_clk(PS2_CLK), .ps2_dat(PS2_DAT),
+                  .rx_byte(kb_byte), .rx_valid(kb_byte_valid), .frame_err(kb_frame_err));
+    kb_decoder u_kbd (.clk(clk), .resetn(resetn), .rx_byte(kb_byte), .rx_valid(kb_byte_valid),
+                      .key_valid(key_valid), .key_code(key_code));
+    order_entry u_entry (
+        .clk(clk), .resetn(resetn), .key_valid(key_valid), .key_code(key_code),
+        .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
+        .k_valid(k_valid), .k_msg(k_msg), .k_ready(k_ready),
+        .next_id(kb_next_id), .sent_count(kb_sent), .err_count(kb_errs),
+        .disp(entry_disp), .state_out(entry_state)
+    );
+
+    // ---------------- order arbiter (Parth, M2): ROM feed + keyboard -> book ----------------
+    order_arbiter u_arb (
+        .clk(clk), .resetn(resetn),
+        .f_valid(msg_valid), .f_msg({msg_type, msg_side, msg_price, msg_id, msg_qty}),
+        .f_ready(f_ready), .f_done(f_done),
+        .k_valid(k_valid), .k_msg(k_msg), .k_ready(k_ready), .k_done(k_done),
+        .b_valid(arb_valid), .b_type(arb_type), .b_side(arb_side), .b_price(arb_price),
+        .b_id(arb_id), .b_qty(arb_qty), .b_ready(book_ready), .b_done(book_done),
+        .owner(arb_owner), .state_out(arb_state)
     );
 
     order_book u_book (
         .clk(clk), .resetn(resetn),
-        .in_valid(msg_valid), .in_ready(book_ready),
-        .in_type(msg_type), .in_side(msg_side), .in_price(msg_price), .in_id(msg_id), .in_qty(msg_qty),
+        .in_valid(arb_valid), .in_ready(book_ready),
+        .in_type(arb_type), .in_side(arb_side), .in_price(arb_price), .in_id(arb_id), .in_qty(arb_qty),
         .done(book_done),
         .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
         .bid_mask(bid_mask), .ask_mask(ask_mask),
@@ -153,7 +206,7 @@ module hft_top #(
         .quote_bid_px(quote_bid_px), .quote_ask_px(quote_ask_px), .quote_size(quote_size)
     );
 
-    // Flat until the matching engine and P&L tracker produce fills (M2).
+    // Flat until Pierce's P&L tracker turns the matching engine's fills into a position (M2).
     wire signed [9:0] position = 10'sd0;
 
     wire       order_valid, our_bid_live, our_ask_live, killed;
@@ -169,6 +222,21 @@ module hft_top #(
         .order_valid(order_valid), .our_bid_live(our_bid_live), .our_bid_px(our_bid_px),
         .our_ask_live(our_ask_live), .our_ask_px(our_ask_px), .our_size(our_size),
         .killed(killed), .reject(reject)
+    );
+
+    // ---------------- matching engine (Parth, M2): fills for our quotes ----------------
+    wire        fill_valid, fill_side;
+    wire [5:0]  fill_px;
+    wire [7:0]  fill_qty, bid_rem, ask_rem;
+    wire [15:0] fill_count;
+
+    matching_engine u_match (
+        .clk(clk), .resetn(resetn),
+        .trade_valid(trade_valid), .trade_side(trade_side), .trade_price(trade_price), .trade_qty(trade_qty),
+        .order_valid(order_valid), .our_bid_live(our_bid_live), .our_bid_px(our_bid_px),
+        .our_ask_live(our_ask_live), .our_ask_px(our_ask_px), .our_size(our_size),
+        .fill_valid(fill_valid), .fill_side(fill_side), .fill_px(fill_px), .fill_qty(fill_qty),
+        .fill_count(fill_count), .bid_rem(bid_rem), .ask_rem(ask_rem)
     );
 
     // ---------------- VGA ----------------
@@ -210,41 +278,49 @@ module hft_top #(
         end
     endfunction
 
-    wire [7:0] bid_dec = our_bid_live ? to_decimal(our_bid_px) : {DIGIT_DASH, DIGIT_DASH};
-    wire [7:0] ask_dec = our_ask_live ? to_decimal(our_ask_px) : {DIGIT_DASH, DIGIT_DASH};
+    // HEX digit codes are 5 bits (seg7.v): 0..9, 10 dash, 15 blank, 16+ letters
+    localparam [4:0] C_DASH = 5'd10, C_BLANK = 5'd15, C_b = 5'd16, C_S = 5'd17, C_F = 5'd25;
+    localparam [9:0] DASH2 = {C_DASH, C_DASH}, BLANK2 = {C_BLANK, C_BLANK};
+    function [9:0] two(input [7:0] d); two = {1'b0, d[7:4], 1'b0, d[3:0]}; endfunction
 
-    // ---------------- Parth's views: market and depth (KEY[2] cycles) ----------------
-    always @(posedge clk) if (view_press) view <= view + 2'd1;   // not reset: view survives KEY[0]
+    wire [7:0] bid_dec = to_decimal(our_bid_px);
+    wire [7:0] ask_dec = to_decimal(our_ask_px);
+
+    // ---------------- Parth's views (KEY[2] cycles; a keyboard key jumps to the entry view) ----------------
+    always @(posedge clk) begin                        // not reset: view survives KEY[0]
+        if (key_valid)       view <= 3'd4;
+        else if (view_press) view <= (view == 3'd5) ? 3'd0 : view + 3'd1;
+    end
 
     // market view: the order book's best bid / ask and the message count
-    wire [7:0] mkt_bid_dec = bid_valid ? to_decimal(best_bid) : {DIGIT_DASH, DIGIT_DASH};
-    wire [7:0] mkt_ask_dec = ask_valid ? to_decimal(best_ask) : {DIGIT_DASH, DIGIT_DASH};
-    wire [6:0] cnt_mod     = msg_count % 11'd100;
-    wire [3:0] cnt_tens    = cnt_mod / 7'd10;
-    wire [3:0] cnt_ones    = cnt_mod % 7'd10;
+    wire [9:0]  mkt_bid = bid_valid ? two(to_decimal(best_bid)) : DASH2;
+    wire [9:0]  mkt_ask = ask_valid ? two(to_decimal(best_ask)) : DASH2;
+    wire [19:0] cnt_bcd, qty_bcd, fills_bcd;
+    bin2bcd u_cnt   (.bin({3'd0, msg_count}), .bcd(cnt_bcd));       // shift-and-add-3, no divider
+    bin2bcd u_qty   (.bin({1'b0, depth_qty}), .bcd(qty_bcd));
+    bin2bcd u_fills (.bin(fill_count[13:0]),  .bcd(fills_bcd));
 
-    // depth views: total shares waiting at the best bid / best ask (read port 2)
-    wire [7:0]  dep_px_dec = depth_side ? mkt_ask_dec : mkt_bid_dec;
-    wire [3:0]  qty_th = depth_qty / 13'd1000;
-    wire [3:0]  qty_hu = (depth_qty / 13'd100) % 13'd10;
-    wire [3:0]  qty_te = (depth_qty / 13'd10)  % 13'd10;
-    wire [3:0]  qty_on = depth_qty % 13'd10;
-
-    reg [7:0] d54, d32, d10;
+    reg [29:0] codes;                                  // HEX5..HEX0, 5 bits each
     always @* begin
         case (view)
-            2'd0: begin d54 = bid_dec;     d32 = ask_dec;          d10 = {DIGIT_BLANK, DIGIT_BLANK}; end
-            2'd1: begin d54 = mkt_bid_dec; d32 = mkt_ask_dec;      d10 = {cnt_tens, cnt_ones};       end
-            default: begin d54 = dep_px_dec; d32 = {qty_th, qty_hu}; d10 = {qty_te, qty_on};         end
+            3'd0: codes = {our_bid_live ? two(bid_dec) : DASH2, our_ask_live ? two(ask_dec) : DASH2, BLANK2};
+            3'd1: codes = {mkt_bid, mkt_ask, 1'b0, cnt_bcd[7:4], 1'b0, cnt_bcd[3:0]};
+            3'd2,
+            3'd3: codes = {depth_side ? mkt_ask : mkt_bid,
+                           1'b0, qty_bcd[15:12], 1'b0, qty_bcd[11:8], 1'b0, qty_bcd[7:4], 1'b0, qty_bcd[3:0]};
+            3'd4: codes = entry_disp;
+            default: codes = (fill_count == 16'd0) ? {C_F, {5{C_DASH}}}
+                           : {fill_side ? C_S : C_b, two(to_decimal(fill_px)),
+                              1'b0, fills_bcd[11:8], 1'b0, fills_bcd[7:4], 1'b0, fills_bcd[3:0]};
         endcase
     end
 
-    seg7 h5 (.d(d54[7:4]), .seg(HEX5));
-    seg7 h4 (.d(d54[3:0]), .seg(HEX4));
-    seg7 h3 (.d(d32[7:4]), .seg(HEX3));
-    seg7 h2 (.d(d32[3:0]), .seg(HEX2));
-    seg7 h1 (.d(d10[7:4]), .seg(HEX1));
-    seg7 h0 (.d(d10[3:0]), .seg(HEX0));
+    seg7 h5 (.d(codes[29:25]), .seg(HEX5));
+    seg7 h4 (.d(codes[24:20]), .seg(HEX4));
+    seg7 h3 (.d(codes[19:15]), .seg(HEX3));
+    seg7 h2 (.d(codes[14:10]), .seg(HEX2));
+    seg7 h1 (.d(codes[9:5]),   .seg(HEX1));
+    seg7 h0 (.d(codes[4:0]),   .seg(HEX0));
 
     assign LEDR[9]   = killed;
     assign LEDR[8]   = feed_end;

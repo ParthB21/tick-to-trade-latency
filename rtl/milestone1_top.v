@@ -92,7 +92,7 @@ module milestone1_top #(
     order_book u_book (
         .clk(clk), .resetn(resetn),
         .in_valid(msg_valid), .in_ready(book_ready),
-        .in_type(msg_type), .in_side(msg_side), .in_price(msg_price), .in_id(msg_id), .in_qty(msg_qty),
+        .in_type(msg_type), .in_side(msg_side), .in_price(msg_price), .in_id({1'b0, msg_id}), .in_qty(msg_qty),
         .done(book_done),
         .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
         .bid_mask(bid_mask), .ask_mask(ask_mask),
@@ -133,12 +133,12 @@ module milestone1_top #(
     wire [3:0] d1 = level_view ? q_te  : cnt_t;
     wire [3:0] d0 = level_view ? q_on  : cnt_o;
 
-    seg7 h5 (.d(d5), .seg(HEX5));
-    seg7 h4 (.d(d4), .seg(HEX4));
-    seg7 h3 (.d(d3), .seg(HEX3));
-    seg7 h2 (.d(d2), .seg(HEX2));
-    seg7 h1 (.d(d1), .seg(HEX1));
-    seg7 h0 (.d(d0), .seg(HEX0));
+    seg7 h5 (.d({1'b0, d5}), .seg(HEX5));
+    seg7 h4 (.d({1'b0, d4}), .seg(HEX4));
+    seg7 h3 (.d({1'b0, d3}), .seg(HEX3));
+    seg7 h2 (.d({1'b0, d2}), .seg(HEX2));
+    seg7 h1 (.d({1'b0, d1}), .seg(HEX1));
+    seg7 h0 (.d({1'b0, d0}), .seg(HEX0));
 
     assign LEDR[9]   = bid_valid;
     assign LEDR[8]   = ask_valid;

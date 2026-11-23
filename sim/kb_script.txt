@@ -1,0 +1,17 @@
+# Keyboard script for the M2 system test (python/system_model.py and tb/hft_system_tb.v).
+# <after_n> <keys>   typed after the n-th ROM message; Enter is added to every line.
+# ! = Esc, < = Backspace
+0 B10 100
+5 S40 50
+20 X1
+30 B40 10
+40 S70 5
+50 B2<5 9
+60 B12!
+100 S31 30
+100 T4 30
+100 X999
+200 T4 5
+300 X2
+500 B0 0
+1000 B20 7

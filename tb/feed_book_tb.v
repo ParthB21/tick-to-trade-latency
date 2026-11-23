@@ -42,7 +42,7 @@ module feed_book_tb;
     order_book u_book (
         .clk(clk), .resetn(resetn),
         .in_valid(msg_valid), .in_ready(book_ready),
-        .in_type(msg_type), .in_side(msg_side), .in_price(msg_price), .in_id(msg_id), .in_qty(msg_qty),
+        .in_type(msg_type), .in_side(msg_side), .in_price(msg_price), .in_id({1'b0, msg_id}), .in_qty(msg_qty),
         .done(book_done),
         .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
         .bid_mask(bid_mask), .ask_mask(ask_mask),

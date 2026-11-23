@@ -2,7 +2,9 @@
 // Keeps the live limit order book for one stock with 64 price levels per side.
 //
 // Storage:
-//   order table  otab[1024]  : per order ID -> {valid, side, price, qty}   (RAM)
+//   order table  otab[2048]  : per order ID -> {valid, side, price, qty}   (RAM)
+//                               ID = {source, id}: source 0 = ROM feed, 1 = keyboard (M2),
+//                               so the two sources never share an order ID
 //   level qty    lvl[128]    : total qty at {side, price}                  (RAM)
 //   level view   lvl_view[128]: identical copy of lvl, read by the dashboard /
 //                               board display through the query port      (RAM)
@@ -19,7 +21,7 @@
 //   unknown order IDs are ignored
 //
 // RAMs cannot be reset, so after reset the FSM walks every address and writes
-// zeros (CLEAR state, ~1024 cycles = 20 us) before accepting messages.
+// zeros (CLEAR state, 2048 cycles = 41 us) before accepting messages.
 //
 // Timing: one message takes 4 cycles (ADD) or 5 cycles (CANCEL/TRADE) from
 // acceptance to the done pulse. best_bid/best_ask are already updated when done = 1.
@@ -33,7 +35,7 @@ module order_book (
     input      [1:0]  in_type,
     input             in_side,
     input      [5:0]  in_price,
-    input      [9:0]  in_id,
+    input      [10:0] in_id,        // {source, 10-bit order ID}
     input      [12:0] in_qty,
     output            done,           // 1-cycle pulse when the message has been applied
 
@@ -83,7 +85,7 @@ module order_book (
     reg [1:0]  m_type;
     reg        m_side;
     reg [5:0]  m_price;
-    reg [9:0]  m_id;
+    reg [10:0] m_id;
     reg [12:0] m_qty;
 
     // ---------------- level update request ----------------
@@ -94,15 +96,15 @@ module order_book (
     reg        is_trade;    // emit a trade event at DONE
 
     // ---------------- clear counter ----------------
-    reg [9:0]  clr_addr;
+    reg [10:0] clr_addr;
 
     // =====================================================================
-    // Order table RAM: 1024 x 21  {valid[20], side[19], price[18:13], qty[12:0]}
+    // Order table RAM: 2048 x 21  {valid[20], side[19], price[18:13], qty[12:0]}
     // =====================================================================
-    (* ramstyle = "no_rw_check" *) reg [20:0] otab [0:1023];
+    (* ramstyle = "no_rw_check" *) reg [20:0] otab [0:2047];
     reg [20:0] otab_q;
     reg        otab_we;
-    reg [9:0]  otab_waddr;
+    reg [10:0] otab_waddr;
     reg [20:0] otab_wdata;
 
     always @(posedge clk) begin
@@ -176,18 +178,18 @@ module order_book (
     always @(posedge clk) begin
         if (!resetn) begin
             state    <= S_CLEAR;
-            clr_addr <= 10'd0;
+            clr_addr <= 11'd0;
             bid_mask <= 64'd0;
             ask_mask <= 64'd0;
             is_trade <= 1'b0;
-            m_type <= 2'd0; m_side <= 1'b0; m_price <= 6'd0; m_id <= 10'd0; m_qty <= 13'd0;
+            m_type <= 2'd0; m_side <= 1'b0; m_price <= 6'd0; m_id <= 11'd0; m_qty <= 13'd0;
             l_side <= 1'b0; l_price <= 6'd0; l_inc <= 1'b0; l_amt <= 13'd0;
             trade_side <= 1'b0; trade_price <= 6'd0; trade_qty <= 13'd0;
         end else begin
             case (state)
                 S_CLEAR: begin
                     clr_addr <= clr_addr + 1'b1;
-                    if (clr_addr == 10'd1023) state <= S_IDLE;
+                    if (clr_addr == 11'd2047) state <= S_IDLE;
                 end
 
                 S_IDLE: if (in_valid) begin

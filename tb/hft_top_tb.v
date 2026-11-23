@@ -30,17 +30,18 @@ module hft_top_tb;
         .HEX0(HEX0), .HEX1(HEX1), .HEX2(HEX2), .HEX3(HEX3), .HEX4(HEX4), .HEX5(HEX5),
         .LEDR(LEDR), .VGA_R(VGA_R), .VGA_G(VGA_G), .VGA_B(VGA_B),
         .VGA_HS(VGA_HS), .VGA_VS(VGA_VS), .VGA_BLANK_N(VGA_BLANK_N),
-        .VGA_SYNC_N(VGA_SYNC_N), .VGA_CLK(VGA_CLK)
+        .VGA_SYNC_N(VGA_SYNC_N), .VGA_CLK(VGA_CLK),
+        .PS2_CLK(1'b1), .PS2_DAT(1'b1)                      // keyboard idle (M2)
     );
 
     // expected HEX patterns, decoded with the tb's own (simulation-only) / and %
     wire [3:0] bid_tens = dut.our_bid_px / 10, bid_ones = dut.our_bid_px % 10;
     wire [3:0] ask_tens = dut.our_ask_px / 10, ask_ones = dut.our_ask_px % 10;
     wire [6:0] exp_hex5, exp_hex4, exp_hex3, exp_hex2;
-    seg7 e5 (.d(bid_tens), .seg(exp_hex5));
-    seg7 e4 (.d(bid_ones), .seg(exp_hex4));
-    seg7 e3 (.d(ask_tens), .seg(exp_hex3));
-    seg7 e2 (.d(ask_ones), .seg(exp_hex2));
+    seg7 e5 (.d({1'b0, bid_tens}), .seg(exp_hex5));
+    seg7 e4 (.d({1'b0, bid_ones}), .seg(exp_hex4));
+    seg7 e3 (.d({1'b0, ask_tens}), .seg(exp_hex3));
+    seg7 e2 (.d({1'b0, ask_ones}), .seg(exp_hex2));
 
     // ---------------- order log + latency ----------------
     integer fout, lat, lat_first, lat_min, lat_max, orders, cycle, frames, errors;

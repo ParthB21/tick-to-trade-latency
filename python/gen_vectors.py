@@ -50,9 +50,13 @@ STRATEGY_EDGES = [
     (30, 1, 33, 1, 1, 2, 3, 2),       # 3*2/8 = 0.75 -> 0
     (30, 1, 33, 1, 1, 2, -3, 2),      # -0.75 rounds toward 0 too (no -1 bias)
     (30, 1, 33, 1, 1, 2, -1, 7),      # -7/8 -> 0
-    (30, 1, 33, 1, 1, 2, 511, 7),     # max long: skew 447, both clamp to 0
-    (30, 1, 33, 1, 1, 2, -512, 7),    # max short: -(-512) magnitude, both clamp to 63
-    (2, 1, 5, 1, 0, 1, 16, 1),        # skew pushes the bid below 0 -> 0, ask stays 2
+    (30, 1, 33, 1, 1, 2, 511, 7),     # max long: skew 447, bid clamps to 0, ask stops at best bid + 1 = 31
+    (30, 1, 33, 1, 1, 2, -512, 7),    # max short: -(-512) magnitude, ask clamps to 63, bid stops at best ask - 1 = 32
+    (2, 1, 5, 1, 0, 1, 16, 1),        # skew pushes the bid below 0 -> 0, ask (2) would cross -> best bid + 1 = 3
+    (30, 1, 31, 1, 0, 2, 9, 2),       # long 9, 1-tick book: ask 29 would cross -> 31 (joins best ask)
+    (30, 1, 31, 1, 1, 2, -8, 2),      # short 8, 1-tick book: bid 31 would cross -> 30 (joins best bid)
+    (30, 1, 31, 1, 3, 2, 16, 2),      # long 16: skew 4 > half-spread 3, ask still 31, not rejected
+    (30, 1, 33, 1, 1, 2, 12, 2),      # long 12: ask 32 + 1 - 3 = 30 would cross -> 31, inside the spread
 ]
 
 

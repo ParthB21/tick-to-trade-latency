@@ -4,10 +4,13 @@
 //
 //   mid2   = best_bid + best_ask                       (mid in half-ticks, no fractions)
 //   skew   = sign(position) * ((|position| * skew_k) >> 3)   ticks, rounds toward 0
-//   bid_px = clamp(floor(mid) - half_spread - skew)    floor(mid) = mid2 >> 1
-//   ask_px = clamp(ceil(mid)  + half_spread - skew)    ceil(mid)  = (mid2 + 1) >> 1
+//   bid_px = clamp(min(floor(mid) - half_spread - skew, best_ask - 1))   floor(mid) = mid2 >> 1
+//   ask_px = clamp(max(ceil(mid)  + half_spread - skew, best_bid + 1))   ceil(mid)  = (mid2 + 1) >> 1
 //   quote_ok = both sides present and the book is not crossed
 // Long -> both quotes move down (sell more easily, buy less); short -> both move up.
+// Skew never pushes a quote across the book: it stops at the best price that does
+// not cross, so the side that reduces the position stays live instead of being
+// rejected by the risk gate's crossing check.
 //
 // FSM:  IDLE --trigger--> CALC --> OUT --> IDLE
 //   IDLE : on trigger (order book "done"), snapshot the inputs
@@ -60,6 +63,10 @@ module strategy (
     // 12-bit signed so results below 0 stay negative instead of wrapping (max |skew| = 448)
     wire signed [11:0] bid_raw = $signed({6'd0, mid2[6:1]})    - $signed({10'd0, s_hs}) - skew;
     wire signed [11:0] ask_raw = $signed({6'd0, mid2_up[6:1]}) + $signed({10'd0, s_hs}) - skew;
+    wire signed [11:0] bid_cap   = $signed({6'd0, s_ask}) - 12'sd1;   // highest bid that does not cross
+    wire signed [11:0] ask_floor = $signed({6'd0, s_bid}) + 12'sd1;   // lowest ask that does not cross
+    wire signed [11:0] bid_safe  = (bid_raw > bid_cap)   ? bid_cap   : bid_raw;
+    wire signed [11:0] ask_safe  = (ask_raw < ask_floor) ? ask_floor : ask_raw;
 
     function [5:0] clamp_px(input signed [11:0] px);
         clamp_px = (px < PX_MIN) ? 6'd0 : (px > PX_MAX) ? 6'd63 : px[5:0];
@@ -82,8 +89,8 @@ module strategy (
                 end
                 S_CALC: begin
                     quote_ok     <= s_bid_valid & s_ask_valid & (s_bid < s_ask);
-                    quote_bid_px <= clamp_px(bid_raw);
-                    quote_ask_px <= clamp_px(ask_raw);
+                    quote_bid_px <= clamp_px(bid_safe);
+                    quote_ask_px <= clamp_px(ask_safe);
                     quote_size   <= s_size;
                     state <= S_OUT;
                 end

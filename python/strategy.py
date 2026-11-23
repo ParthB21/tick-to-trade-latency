@@ -26,6 +26,7 @@ def strategy(best_bid, bid_valid, best_ask, ask_valid, half_spread, size, positi
     ok = bid_valid and ask_valid and best_bid < best_ask
     mid2 = best_bid + best_ask
     skew = skew_ticks(position, skew_k)
-    bid = clamp_px((mid2 >> 1) - half_spread - skew)
-    ask = clamp_px(((mid2 + 1) >> 1) + half_spread - skew)
+    # skew stops at the best non-crossing price so the reducing side stays live
+    bid = clamp_px(min((mid2 >> 1) - half_spread - skew, best_ask - 1))
+    ask = clamp_px(max(((mid2 + 1) >> 1) + half_spread - skew, best_bid + 1))
     return ok, bid, ask, size

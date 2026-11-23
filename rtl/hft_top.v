@@ -1,6 +1,7 @@
 // hft_top.v  (Pierce, using Parth's market-side modules)
-// Milestone 1 board top: ROM -> feed handler -> order book -> strategy -> risk gate,
-// with the live book and our quotes on VGA (dashboard) and risk status on the LEDs.
+// Board top: ROM -> feed handler -> order book -> strategy -> risk gate, with the
+// P&L tracker feeding position back to the strategy (skew) and the risk gate (limits).
+// The live book, our quotes, position and P&L are on VGA (dashboard), risk status on the LEDs.
 //
 // vga_adapter is the course-provided VGA core (vga_adapter.v, vga_controller.v,
 // vga_address_translator.v, vga_pll.v), used unmodified, with a black 320x240
@@ -13,6 +14,7 @@
 //   KEY[3]   data set: 1000-message market <-> 13-message hand-checkable test
 //            (switching restarts everything, like KEY[0]; starts on the market data)
 //   SW[1:0]  replay: 00 step with KEY[1], 01 auto 4 msgs/s, 1x full speed
+//   SW[2]    inventory skew on: quotes shift 1 tick per 4 shares held
 //   SW[4:3]  quote size per side: 1 / 2 / 4 / 8
 //   SW[6:5]  half-spread: 0..3 ticks either side of the mid
 //   SW[8:7]  max |position|: 4 / 8 / 16 / 32
@@ -30,7 +32,8 @@ module hft_top #(
     parameter AUTO_DIV   = 12_500_000,               // 0.25 s at 50 MHz
     parameter MARKET_HEX = "../mem/market_data.hex", // relative to the Quartus project folder
     parameter SMALL_HEX  = "../mem/test_small.hex",  // 13-message hand-checkable test
-    parameter MAX_SIZE   = 8
+    parameter MAX_SIZE   = 8,
+    parameter SKEW_K     = 2                         // skew = position * SKEW_K / 8 ticks
 ) (
     input        CLOCK_50,
     input  [3:0] KEY,
@@ -144,17 +147,31 @@ module hft_top #(
     wire [7:0] quote_size;
     wire [7:0] size    = 8'd1 << sw[4:3];
     wire [8:0] max_pos = BASE_MAX_POS << sw[8:7];
+    wire [2:0] skew_k  = sw[2] ? SKEW_K[2:0] : 3'd0;
+    wire signed [9:0]  position;
+    wire signed [23:0] pnl;
 
     strategy u_strategy (
         .clk(clk), .resetn(resetn), .trigger(book_done),
         .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
-        .half_spread(sw[6:5]), .size(size),
+        .half_spread(sw[6:5]), .size(size), .position(position), .skew_k(skew_k),
         .quote_valid(quote_valid), .quote_ok(quote_ok),
         .quote_bid_px(quote_bid_px), .quote_ask_px(quote_ask_px), .quote_size(quote_size)
     );
 
-    // Flat until the matching engine and P&L tracker produce fills (M2).
-    wire signed [9:0] position = 10'sd0;
+    // Fills come from the matching engine (Parth). It is not connected yet, so
+    // nothing fills and position / P&L stay 0; this is the interface it drives.
+    wire       fill_valid = 1'b0;
+    wire       fill_side  = 1'b0;   // 0 = our bid hit (bought), 1 = our ask lifted (sold)
+    wire [5:0] fill_px    = 6'd0;
+    wire [7:0] fill_qty   = 8'd0;
+
+    pnl_tracker u_pnl (
+        .clk(clk), .resetn(resetn),
+        .fill_valid(fill_valid), .fill_side(fill_side), .fill_px(fill_px), .fill_qty(fill_qty),
+        .best_bid(best_bid), .bid_valid(bid_valid), .best_ask(best_ask), .ask_valid(ask_valid),
+        .position(position), .pnl(pnl)
+    );
 
     wire       order_valid, our_bid_live, our_ask_live, killed;
     wire [5:0] our_bid_px, our_ask_px, reject;
@@ -182,6 +199,7 @@ module hft_top #(
         .q_side(q_side), .q_level(q_level), .q_qty(q_qty),
         .our_bid_live(our_bid_live), .our_bid_px(our_bid_px),
         .our_ask_live(our_ask_live), .our_ask_px(our_ask_px),
+        .position(position), .pnl(pnl),
         .x(vga_x), .y(vga_y), .colour(vga_colour), .plot(vga_plot)
     );
 

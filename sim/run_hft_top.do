@@ -1,10 +1,11 @@
-# ModelSim: full Milestone 1 system (ROM -> feed -> book -> strategy -> risk -> dashboard)
+# ModelSim: full system (ROM -> feed -> book -> strategy -> risk -> P&L -> dashboard)
 # with the simulation VGA stub. Writes out/orders.txt and out/frame.hex, then run:
 #   python ../python/e2e.py ../mem/market_data.hex out
 file mkdir out
 vlib work
 vlog ../rtl/market_rom.v ../rtl/feed_handler.v ../rtl/prio_enc64.v ../rtl/order_book.v ../rtl/seg7.v \
-     ../rtl/sync2.v ../rtl/strategy.v ../rtl/risk_gate.v ../rtl/dashboard.v ../rtl/hft_top.v \
+     ../rtl/sync2.v ../rtl/strategy.v ../rtl/risk_gate.v ../rtl/pnl_tracker.v \
+     ../rtl/font_rom.v ../rtl/bin2bcd.v ../rtl/dashboard.v ../rtl/hft_top.v \
      ../tb/mocks/vga_adapter.v ../tb/hft_top_tb.v
 vsim work.hft_top_tb
 add wave /hft_top_tb/clk

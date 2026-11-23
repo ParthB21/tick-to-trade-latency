@@ -23,7 +23,7 @@
 //            (any keyboard key except the arrows jumps to the entry view)
 //   PS/2     order entry: B<price> <qty>Enter, S<price> <qty>Enter, X<id>Enter, T<id> <qty>Enter
 //   arrows   VGA cursor: up/down next bar above/below, left best bid, right best ask;
-//            the top-right corner shows its side, price and shares
+//            its bar turns white and the top-right corner shows its side, price and shares
 //   KEY[3]   data set: 1000-message market <-> 13-message hand-checkable test
 //            (switching restarts everything, like KEY[0]; starts on the market data)
 //   SW[1:0]  replay: 00 step with KEY[1], 01 auto 4 msgs/s, 1x full speed

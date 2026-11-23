@@ -8,7 +8,7 @@
 //   asks : red bar starting at x = 160, growing right
 //   bar length = min(qty >> 5, 159) pixels, at least 1 pixel if qty > 0
 //   our live bid / ask : yellow 8-pixel marker at x = 8..15 / x = 304..311
-//   arrow-key cursor   : white 4-pixel marker at x = 0..3 and x = 316..319 on the cursor level
+//   arrow-key cursor   : the bar(s) on the cursor level are drawn white instead of green / red
 //   cursor readout     : top-right black box (x >= 226, rows 0..10) with one text line
 //                        "BID pp QTY qqqq" (green) / "ASK pp QTY qqqq" (red) / "--- pp QTY 0000"
 //
@@ -85,8 +85,6 @@ module dashboard (
     localparam MARK_W     = 9'd8;
     localparam BID_MARK_X = 9'd8;
     localparam ASK_MARK_X = 9'd304;
-    localparam CUR_W      = 9'd4;      // cursor marker width at each edge
-    localparam CUR_R_X    = 9'd316;
 
     localparam LAST_Y     = 8'd239;
     localparam TEXT_X     = 9'd4;      // left edge of the first panel cell
@@ -360,6 +358,7 @@ module dashboard (
     end
     wire [2:0] read_colour = d_is_bid ? GREEN : d_is_ask ? RED : WHITE;
     wire       in_box      = (x >= BOX_X) && (y <= BOX_LAST_Y);
+    wire       on_cursor   = (level == f_cursor);
 
     function [7:0] bar_len(input [12:0] qty);
         reg [7:0] scaled;
@@ -380,13 +379,12 @@ module dashboard (
         else if (in_box)
             colour = glyph_lit ? read_colour : BLACK;
         else if (dy != GAP_ROW) begin
-            if (x < CENTRE && (CENTRE - x) <= bid_len)          colour = GREEN;
-            if (x >= CENTRE && (x - CENTRE) < ask_len)          colour = RED;
+            if (x < CENTRE && (CENTRE - x) <= bid_len)          colour = on_cursor ? WHITE : GREEN;
+            if (x >= CENTRE && (x - CENTRE) < ask_len)          colour = on_cursor ? WHITE : RED;
             if (f_bid_live && level == f_bid_px &&
                 x >= BID_MARK_X && x < BID_MARK_X + MARK_W)     colour = YELLOW;
             if (f_ask_live && level == f_ask_px &&
                 x >= ASK_MARK_X && x < ASK_MARK_X + MARK_W)     colour = YELLOW;
-            if (level == f_cursor && (x < CUR_W || x >= CUR_R_X)) colour = WHITE;
         end
     end
 

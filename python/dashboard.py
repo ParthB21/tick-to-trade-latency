@@ -31,10 +31,9 @@ SEG_CHAR = {**{d: str(d) for d in range(10)}, 10: "-", 16: "B", 17: "S", 18: "C"
 IDLE_KEYS = [10] * 6                       # order entry with nothing typed: "------"
 RISK_WORDS = [(20, "KILL"), (25, "SIDE"), (30, "SIZE"), (35, "LONG"), (40, "SHORT"), (46, "CROSS")]
 
-# arrow-key cursor (book_cursor.v): white 4-pixel markers at both edges of its level, and a
+# arrow-key cursor (book_cursor.v): the bar(s) on its level are drawn white, and a
 # top-right readout box with one line "BID pp QTY qqqq" / "ASK pp QTY qqqq" / "--- pp QTY 0000"
 CURSOR_START = 32
-CUR_W, CUR_R_X = 4, 316
 READ_X, READ_Y, BOX_X, BOX_LAST_Y = 230, 1, 226, 10
 
 
@@ -134,17 +133,15 @@ def render(qty, bid_live, bid_px, ask_live, ask_px, position, pnl, panel=None):
         top = (N_LEVELS - 1 - level) * ROW_H
         for y in range(top, top + ROW_H - 1):
             row = frame[y]
+            on_cursor = level == p["cursor"]
             for x in range(CENTRE - bid_l, CENTRE):
-                row[x] = GREEN
+                row[x] = WHITE if on_cursor else GREEN
             for x in range(CENTRE, CENTRE + ask_l):
-                row[x] = RED
+                row[x] = WHITE if on_cursor else RED
             if bid_live and level == bid_px:
                 row[BID_MARK_X:BID_MARK_X + MARK_W] = [YELLOW] * MARK_W
             if ask_live and level == ask_px:
                 row[ASK_MARK_X:ASK_MARK_X + MARK_W] = [YELLOW] * MARK_W
-            if level == p["cursor"]:
-                row[0:CUR_W] = [WHITE] * CUR_W
-                row[CUR_R_X:WIDTH] = [WHITE] * (WIDTH - CUR_R_X)
     for y in range(BOX_LAST_Y + 1):
         frame[y][BOX_X:WIDTH] = [BLACK] * (WIDTH - BOX_X)
     text, colour = cursor_readout(qty, p["cursor"])

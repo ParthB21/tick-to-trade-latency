@@ -105,7 +105,7 @@ module dashboard_tb;
         best_bid = 6'd0; bid_valid = 0; best_ask = 6'd63; ask_valid = 1; msg_count = 11'd7;
         our_size = 8'd8; skew_on = 0; fill_count = 16'd12; fill_side = 1; fill_px = 6'd63; fill_qty = 8'd3;
         reject = 6'b100011; entry_disp = {5'd17, 5'd23, 5'd15, 5'd15, 5'd1, 5'd4};
-        cursor = 6'd63;                                             // top level: right marker under the box
+        cursor = 6'd63;                                             // top level: white bar runs under the readout box
         run_case(1, 0, 6'd0,  1, 6'd63,  10'sd5,    24'sd4321);     // bid pulled, ask at the top level
         // panel case 2: clamps (2047 msgs, size 255 -> 9, 12345 fills -> 9999), a buy fill, "Err", all flags
         best_bid = 6'd0; bid_valid = 1; best_ask = 6'd1; ask_valid = 1; msg_count = 11'd2047;

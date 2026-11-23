@@ -44,8 +44,8 @@
 //   fills view    : HEX5 b (we bought) / S (we sold) for the last fill, HEX4-3 its price,
 //                   HEX2-0 number of fills (last 3 digits);  "F-----" = no fills yet
 //   LEDR[9] killed   LEDR[8] feed finished   LEDR[7] ask live   LEDR[6] bid live
-//   LEDR[5:0] sticky reject flags: 5 cross, 4 short limit, 3 long limit,
-//             2 size, 1 quote not ok (book one-sided), 0 kill
+//   LEDR[5:0] reject flags: 5 cross, 4 short limit, 3 long limit, 2 size, 0 kill (sticky until
+//             reset); 1 quote not ok (book one-sided) is live: on only while the book is one-sided
 module hft_top #(
     parameter AUTO_DIV   = 12_500_000,               // 0.25 s at 50 MHz
     parameter MARKET_HEX = "../mem/market_data.hex", // relative to the Quartus project folder

@@ -288,7 +288,7 @@ The bottom of the screen (rows 192–239) now shows 6 lines of 5x7 text at 1x in
 | `POS -002   PNL +00002` | white / green or red | Pierce's P&L tracker |
 | `FILLS 0001  LAST SELL 002 AT 14` | cyan | matching engine: fill count, last fill |
 | `KEYS S D 0001` | white (red for ERR) | the same 6 codes as the HEX entry view |
-| `RISK OK` / `RISK KILL SIDE ... CROSS` | green / red | the risk gate's sticky reject flags |
+| `RISK OK` / `RISK KILL SIDE ... CROSS` | green / red | the risk gate's reject flags (SIDE live, the rest sticky) |
 
 Every number goes through Pierce's sequential `bin2bcd` at the frame start; the font is
 generated from `python/font.py` by `python/gen_font_rom.py`, so the hardware and the

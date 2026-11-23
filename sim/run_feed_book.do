@@ -18,7 +18,7 @@ add wave -radix unsigned /feed_book_tb/book_state /feed_book_tb/book_ready /feed
 add wave -radix unsigned /feed_book_tb/best_bid /feed_book_tb/bid_valid /feed_book_tb/best_ask /feed_book_tb/ask_valid
 add wave -radix unsigned /feed_book_tb/trade_valid /feed_book_tb/trade_side /feed_book_tb/trade_price /feed_book_tb/trade_qty
 run -all
-wave zoom range 20400ns 22000ns
+wave zoom range 41000ns 42600ns
 
 # Show FSM states by name (added after the run so a problem here never stops the sim)
 virtual type {IDLE READ LATCH SEND WAIT FINISHED} feed_state_t

@@ -17,8 +17,8 @@ add wave -radix unsigned /order_book_tb/trade_valid /order_book_tb/trade_side /o
 add wave -divider "Query port"
 add wave -radix unsigned /order_book_tb/q_side /order_book_tb/q_level /order_book_tb/q_qty
 run -all
-# skip the 20 us RAM clear and zoom on the messages
-wave zoom range 20400ns 22200ns
+# skip the 41 us RAM clear (2048 addresses since M2) and zoom on the messages
+wave zoom range 41000ns 42800ns
 
 # Show FSM states by name (added after the run so a problem here never stops the sim)
 virtual type {CLEAR IDLE ADD_TBL TBL_RD TBL_CHK LVL_RD LVL_UPD DONE} book_state_t

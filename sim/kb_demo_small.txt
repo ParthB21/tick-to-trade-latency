@@ -1,0 +1,8 @@
+# Board demo keyboard script on the 13-message test data (KEY[3]), half-spread 1, size 2.
+# Same format as kb_script.txt (typed after the n-th ROM message, Enter added).
+# python/demo_table.py prints what the HEX displays should show at every step.
+4 S14 30
+4 T1 30
+4 B14 5
+4 S20 9
+4 X2

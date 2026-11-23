@@ -18,8 +18,11 @@ class OrderBook:
         self.qty = [[0] * N_LEVELS, [0] * N_LEVELS]   # qty[side][price]
         self.orders = {}                               # oid -> [side, price, qty]
 
-    def apply(self, word):
+    def apply(self, word, src=0):
+        """src = 0 ROM feed, 1 keyboard. The arbiter adds src as bit 10 of the
+        order ID, so the two sources have separate ID spaces (M2)."""
         mtype, side, price, oid, qty = unpack(word)
+        oid |= src << 10
         if mtype == ADD:
             # Hardware overwrites the table entry; a well-formed feed never
             # reuses a live ID, and the generator guarantees that.

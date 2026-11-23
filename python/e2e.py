@@ -1,6 +1,9 @@
 """
-End-to-end reference model: ROM -> order book (Parth's model) -> strategy -> risk gate,
-then the dashboard frame. Checks the hft_top_tb outputs against it.
+End-to-end reference model: ROM -> order book (Parth's model) -> strategy -> risk gate
+-> matching engine (Parth) -> P&L tracker, then the dashboard frame. Checks the
+hft_top_tb outputs against it. Same per-message timing as python/system_model.py:
+the strategy snapshots the position before this message's fill, the risk gate sees
+the position after it.
 
   out/orders.txt : one line per order the risk gate sent, first line = config
   out/frame.hex  : VGA frame buffer after the replay
@@ -14,11 +17,12 @@ from msgfmt import END, read_hex, unpack
 from ref_model import OrderBook
 from strategy import strategy
 from risk import RiskState, risk_step
+from pnl import PnlState, pnl_step, BUY
+from matching import MatchingEngine
 from dashboard import read_frame, render, write_png, WIDTH, HEIGHT
 
 MAX_REPORT = 10
-POSITION = 0                    # flat until fills exist (M2)
-NO_QUOTE = (0, 0, 0, 0, 0)
+NO_FILL = (0, BUY, 0, 0)
 
 
 def read_config(line):
@@ -26,18 +30,31 @@ def read_config(line):
 
 
 def expected_orders(hex_path, cfg):
-    book, st, rows = OrderBook(), RiskState(), []
+    book, st, pnl, me, rows = OrderBook(), RiskState(), PnlState(), MatchingEngine(), []
+    last_fill, n_msgs = None, 0
     for i, word in enumerate(read_hex(hex_path)):
         if unpack(word)[0] == END:
             break
-        book.apply(word)
+        trade = book.apply(word)
         bb, ba = book.best_bid(), book.best_ask()
         # the hardware priority encoder outputs 0 for an empty side
         top = (max(bb, 0), bb >= 0, max(ba, 0), ba >= 0)
-        ok, bid, ask, size = strategy(top[0], top[1], top[2], top[3], cfg["half_spread"], cfg["size"])
-        st = risk_step(st, False, (1, ok, bid, ask, size), top, POSITION, cfg["max_pos"], cfg["max_size"])
+        pos_before = pnl.position                    # strategy snapshot (book done cycle)
+        fill = me.on_trade(*trade) if trade else None
+        last_fill = fill or last_fill
+        n_msgs += 1
+        pnl = pnl_step(pnl, (1, fill.side, fill.px, fill.qty) if fill else NO_FILL, top)
+        ok, bid, ask, size = strategy(top[0], top[1], top[2], top[3], cfg["half_spread"], cfg["size"],
+                                      pos_before, cfg["skew_k"])
+        st = risk_step(st, False, (1, ok, bid, ask, size), top, pnl.position, cfg["max_pos"], cfg["max_size"])
+        me.on_order(st.bid_live, st.bid_px, st.ask_live, st.ask_px, st.size)
         rows.append((i, int(st.bid_live), st.bid_px, int(st.ask_live), st.ask_px, st.size))
-    return rows, book, st
+    bb, ba = book.best_bid(), book.best_ask()
+    panel = dict(best_bid=max(bb, 0), bid_valid=bb >= 0, best_ask=max(ba, 0), ask_valid=ba >= 0,
+                 msg_count=n_msgs, size=st.size, skew=cfg["skew_k"] > 0, fill_count=me.fills,
+                 fill_side=last_fill.side if last_fill else 0, fill_px=last_fill.px if last_fill else 0,
+                 fill_qty=last_fill.qty if last_fill else 0, reject=st.reject)   # keyboard idle
+    return rows, book, st, pnl, panel
 
 
 def compare_orders(exp, got):
@@ -68,10 +85,12 @@ if __name__ == "__main__":
     cfg = read_config(lines[0])
     got = [tuple(map(int, line.split())) for line in lines[1:]]
 
-    exp, book, st = expected_orders(hex_path, cfg)
+    exp, book, st, pnl, panel = expected_orders(hex_path, cfg)
     order_errors = compare_orders(exp, got)
 
-    exp_frame = render(book.qty, st.bid_live, st.bid_px, st.ask_live, st.ask_px)
+    settled_pnl = pnl.cash + pnl.position * pnl.mark   # the register has settled long before the frame dump
+    exp_frame = render(book.qty, st.bid_live, st.bid_px, st.ask_live, st.ask_px, pnl.position, settled_pnl,
+                       panel)
     sim_frame = read_frame(os.path.join(out, "frame.hex"))
     write_png(exp_frame, os.path.join(out, "expected.png"))
     write_png(sim_frame, os.path.join(out, "sim.png"))

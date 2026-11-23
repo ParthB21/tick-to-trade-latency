@@ -53,9 +53,12 @@ One 32-bit ROM word per message:
 
 | File | What it does |
 |---|---|
-| `strategy.v` | Market-making quote. On each `done` it snapshots the top of book, takes the mid, and quotes `floor(mid) - half_spread` and `ceil(mid) + half_spread`, clamped to 0..63. Works in half-ticks (`bid + ask`) so there are no fractions. Signed 9-bit maths so a quote below 0 clamps to 0 instead of wrapping. 2 cycles. |
+| `strategy.v` | Market-making quote. On each `done` it snapshots the top of book and our position, takes the mid, and quotes `floor(mid) - half_spread - skew` and `ceil(mid) + half_spread - skew`, clamped to 0..63. `skew = position * skew_k / 8` ticks (a multiplier, rounded toward zero), so when we are long both quotes drop and we sell more easily. Works in half-ticks (`bid + ask`) so there are no fractions. Signed 12-bit maths so a quote below 0 clamps to 0 instead of wrapping. 2 cycles. |
 | `risk_gate.v` | Checks each side of the quote in parallel: size limit, position limits, and that it doesn't cross the market. A side that fails is pulled, the other can still go out. Kill switch latches until reset and pulls both sides. Sticky reject flags for the LEDs. 1 cycle. |
-| `dashboard.v` | Draws the book on VGA as a ladder: one row pair per price, green bars for bids, red for asks, yellow markers for our quotes. It repaints every pixel continuously instead of erasing, so old bars disappear on their own. A full frame takes 1.2 ms. |
+| `pnl_tracker.v` | Position and P&L accumulators. Each fill adds or subtracts shares and `px * qty` cash; P&L = cash + position x mark, where the mark is the floor of the mid. Feeds position back to the strategy (skew) and the risk gate (limits). |
+| `dashboard.v` | Draws the book on VGA as a ladder: one row pair per price, green bars for bids, red for asks, yellow markers for our quotes. Below it, `POS +ddd` in white and `PNL +ddddd` in green (red when negative). It repaints every pixel continuously instead of erasing, so old bars and digits disappear on their own. A full frame takes 1.5 ms. |
+| `font_rom.v` | 5x7 glyphs for the digits, `+`, `-` and the letters of POS / PNL. Drawn 2x on screen. |
+| `bin2bcd.v` | Binary to decimal digits by shift-and-add-3, one bit per clock (no divider). |
 
 **Shared and top level**
 
@@ -74,7 +77,8 @@ One 32-bit ROM word per message:
 | `gen_market.py` | Generates `mem/market_data.*` and `mem/test_small.*`. |
 | `ref_model.py` | Order book model. Writes the expected best bid/ask after every message. |
 | `compare.py` | Diffs the book simulation against `ref_model.py`. |
-| `strategy.py`, `risk.py`, `dashboard.py` | Models of the strategy, risk gate and VGA frame. |
+| `strategy.py`, `risk.py`, `pnl.py`, `dashboard.py` | Models of the strategy, risk gate, P&L tracker and VGA frame. |
+| `check_dashboard.py` | Checks the dashboard testbench's frames (fake book, several position / P&L cases) pixel by pixel. |
 | `gen_vectors.py` | Writes the random and edge-case test vectors in `sim/vectors/`. |
 | `e2e.py` | Chains book -> strategy -> risk in Python, then checks every order and every VGA pixel from the full simulation. Writes `expected.png` and `sim.png` to compare by eye. |
 
@@ -86,11 +90,13 @@ One 32-bit ROM word per message:
 sim/run_all.sh
 ```
 
-This regenerates the vectors, runs the strategy, risk gate and full-board testbenches, then
-runs `e2e.py`. Output goes to `sim/out/`. Current results:
+This regenerates the vectors, runs the strategy, risk gate, P&L tracker, dashboard and
+full-board testbenches, then runs `e2e.py`. Output goes to `sim/out/`. Current results:
 
-- strategy: 212 vectors pass, 2-cycle latency checked on each
+- strategy: 221 vectors pass (including inventory skew at +-511/-512), 2-cycle latency checked on each
 - risk gate: 244 cycles pass, every reject flag exercised
+- P&L tracker: 521 cycles pass, position reaching +-510
+- dashboard: 3 frames (negative, clamped, zero and -512 values) match pixel for pixel
 - full board: 1000/1000 orders and 76,800/76,800 frame pixels match the Python chain
 - tick-to-trade: 7 to 8 cycles; the first message after reset takes 1028 because of the RAM clear
 
@@ -101,7 +107,8 @@ runs `e2e.py`. Output goes to `sim/out/`. Current results:
 | `do run_order_book.do` | The book on its own, 23 directed checks. |
 | `do run_feed_book.do` | ROM -> feed -> book over all 1000 messages. Writes `sim_out.txt`. |
 | `do run_top.do` | `milestone1_top`, printing the HEX displays after each key press. |
-| `do run_strategy.do`, `do run_risk_gate.do` | Strategy and risk gate against their vectors. |
+| `do run_strategy.do`, `do run_risk_gate.do`, `do run_pnl_tracker.do` | Strategy, risk gate and P&L tracker against their vectors. |
+| `do run_dashboard.do` | Dashboard with a fake book. Then run `python ../python/check_dashboard.py out`. |
 | `do run_hft_top.do` | Full board. Then run `python ../python/e2e.py ../mem/market_data.hex out`. |
 
 To check the book against Python: `python ../python/compare.py expected.txt sim_out.txt`.
@@ -132,6 +139,7 @@ python ref_model.py ../mem/test_small.hex ../sim/expected_small.txt
 | KEY[0] | Reset |
 | KEY[1] | One message per press (when SW[1:0] = 00) |
 | SW[1:0] | 00 step, 01 auto (4 messages/s), 1x full speed |
+| SW[2] | Inventory skew on (quotes shift 1 tick per 4 shares held) |
 | SW[4:3] | Quote size 1 / 2 / 4 / 8 |
 | SW[6:5] | Half-spread 0..3 ticks |
 | SW[8:7] | Max position 4 / 8 / 16 / 32 |
@@ -141,8 +149,13 @@ HEX5-4 shows our bid, HEX3-2 our ask (`--` when that side isn't live). LEDR[9] k
 LEDR[8] feed finished, LEDR[7]/[6] ask/bid live, LEDR[5:0] reject flags
 (5 cross, 4 short limit, 3 long limit, 2 size, 1 one-sided book, 0 kill).
 
-Position is held at zero for now, since nothing fills our orders yet, so the position limits
-only fire in the unit tests. The matching engine, P&L tracker and inventory skew come next.
+Nothing fills our orders until the matching engine is connected, so position and P&L stay
+at zero on the board and skew has no effect yet. The position limits still fire on the board
+when the quote size is bigger than the max position (SW[4:3] = 11 with SW[8:7] = 00).
+
+**Fill interface** (matching engine -> `pnl_tracker`, wired in `hft_top.v`):
+`fill_valid` (1-cycle pulse), `fill_side` (0 = our bid hit, we bought; 1 = our ask lifted,
+we sold), `fill_px[5:0]`, `fill_qty[7:0]`.
 
 ## Controls: `milestone1_top`
 

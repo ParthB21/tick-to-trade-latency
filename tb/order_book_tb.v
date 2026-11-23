@@ -13,7 +13,7 @@ module order_book_tb;
     reg  [1:0]  in_type = 0;
     reg         in_side = 0;
     reg  [5:0]  in_price = 0;
-    reg  [9:0]  in_id = 0;
+    reg  [10:0] in_id = 0;              // {source, id}: bit 10 = 1 for keyboard orders
     reg  [12:0] in_qty = 0;
     wire        in_ready, done;
     wire [5:0]  best_bid, best_ask;
@@ -48,7 +48,7 @@ module order_book_tb;
     integer cycles = 0;
 
     // Send one message and wait for the book to finish it
-    task send(input [1:0] t, input s, input [5:0] p, input [9:0] id, input [12:0] q);
+    task send(input [1:0] t, input s, input [5:0] p, input [10:0] id, input [12:0] q);
         begin
             @(negedge clk);
             in_type = t; in_side = s; in_price = p; in_id = id; in_qty = q; in_valid = 1;
@@ -131,6 +131,11 @@ module order_book_tb;
         send(TRADE,  ASK, 0, 4, 5);     check_top(NONE, 15, "trade on deleted id: ignored");
         send(ADD,    BID, 63, 7, 1);    check_top(63, 15,   "edge: bid at top level 63");
         send(ADD,    ASK, 0, 8, 1);     check_top(63, 0,    "edge: ask at bottom level 0");
+        // M2: keyboard orders (source bit 10 = 1) have their own ID space
+        send(ADD,    BID, 20, 11'h407, 5); check_top(63, 0, "kbd id 7 bid @20 (ROM id 7 untouched)");
+        send(CANCEL, BID, 0, 11'h007, 0);  check_top(20, 0, "cancel ROM id 7: kbd id 7 stays");
+                                         check_level(BID, 20, 5);
+        send(CANCEL, BID, 0, 11'h407, 0);  check_top(NONE, 0, "cancel kbd id 7: no bids left");
 
         $display("----------------------------------------");
         $display("%0d checks passed, %0d failed  =>  %0s", pass, fail, fail ? "FAIL" : "ALL PASS");

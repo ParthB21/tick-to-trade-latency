@@ -1,5 +1,5 @@
 // hft_top_tb.v  (Pierce)
-// End-to-end test of the Milestone 1 board top, using the simulation VGA stub.
+// End-to-end test of the board top, using the simulation VGA stub.
 //   1. Replays all 1000 market messages at full speed.
 //   2. Logs every order the risk gate sends to out/orders.txt
 //      (python/e2e.py compares it to the chained Python model).
@@ -11,7 +11,11 @@
 module hft_top_tb;
     parameter MARKET_HEX = "../mem/market_data.hex";
     localparam MAX_SIZE = 8;
-    localparam FRAMES_TO_WAIT = 2;
+    // 3, not 2: a frame is counted when the ladder ends (row 191), but the position/P&L
+    // text below it shows values latched at that frame's START. Frame 1 after the feed
+    // ends started before it ended, so the final position/P&L first appear in frame 2's
+    // text, which is only drawn after frame 2's ladder; the dump after frame 3's ladder has it.
+    localparam FRAMES_TO_WAIT = 3;
     localparam TIMEOUT_CYCLES = 1_000_000;
     localparam KILL_SETTLE    = 5;          // 2 sync flops + 1 register, with margin
 
@@ -30,17 +34,18 @@ module hft_top_tb;
         .HEX0(HEX0), .HEX1(HEX1), .HEX2(HEX2), .HEX3(HEX3), .HEX4(HEX4), .HEX5(HEX5),
         .LEDR(LEDR), .VGA_R(VGA_R), .VGA_G(VGA_G), .VGA_B(VGA_B),
         .VGA_HS(VGA_HS), .VGA_VS(VGA_VS), .VGA_BLANK_N(VGA_BLANK_N),
-        .VGA_SYNC_N(VGA_SYNC_N), .VGA_CLK(VGA_CLK)
+        .VGA_SYNC_N(VGA_SYNC_N), .VGA_CLK(VGA_CLK),
+        .PS2_CLK(1'b1), .PS2_DAT(1'b1)                      // keyboard idle (M2)
     );
 
     // expected HEX patterns, decoded with the tb's own (simulation-only) / and %
     wire [3:0] bid_tens = dut.our_bid_px / 10, bid_ones = dut.our_bid_px % 10;
     wire [3:0] ask_tens = dut.our_ask_px / 10, ask_ones = dut.our_ask_px % 10;
     wire [6:0] exp_hex5, exp_hex4, exp_hex3, exp_hex2;
-    seg7 e5 (.d(bid_tens), .seg(exp_hex5));
-    seg7 e4 (.d(bid_ones), .seg(exp_hex4));
-    seg7 e3 (.d(ask_tens), .seg(exp_hex3));
-    seg7 e2 (.d(ask_ones), .seg(exp_hex2));
+    seg7 e5 (.d({1'b0, bid_tens}), .seg(exp_hex5));
+    seg7 e4 (.d({1'b0, bid_ones}), .seg(exp_hex4));
+    seg7 e3 (.d({1'b0, ask_tens}), .seg(exp_hex3));
+    seg7 e2 (.d({1'b0, ask_ones}), .seg(exp_hex2));
 
     // ---------------- order log + latency ----------------
     integer fout, lat, lat_first, lat_min, lat_max, orders, cycle, frames, errors;
@@ -68,11 +73,11 @@ module hft_top_tb;
         cycle = 0; orders = 0; frames = 0; errors = 0; timing = 0;
         lat = 0; lat_min = 1 << 30; lat_max = 0;
 
-        //     kill  max_pos 8  hs 1   size 2        full speed
-        SW  = {1'b0, 2'b01,     2'b01, 2'b01, 1'b0, 2'b10};
+        //     kill  max_pos 8  hs 1   size 2 skew on full speed
+        SW  = {1'b0, 2'b01,     2'b01, 2'b01, 1'b1, 2'b10};
         KEY = 4'b1110;                                      // hold reset
-        $fdisplay(fout, "config half_spread=%0d size=%0d max_pos=%0d max_size=%0d",
-                  SW[6:5], 1 << SW[4:3], 4 << SW[8:7], MAX_SIZE);
+        $fdisplay(fout, "config half_spread=%0d size=%0d max_pos=%0d max_size=%0d skew_k=%0d",
+                  SW[6:5], 1 << SW[4:3], 4 << SW[8:7], MAX_SIZE, SW[2] ? dut.SKEW_K : 0);
         repeat (5) @(posedge clk);
         KEY = 4'b1111;
 

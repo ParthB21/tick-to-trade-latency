@@ -17,7 +17,16 @@ run() {  # name, files...
 python3 ../python/gen_vectors.py
 run strategy  ../rtl/strategy.v  ../tb/strategy_tb.v
 run risk_gate ../rtl/risk_gate.v ../tb/risk_gate_tb.v
+run pnl_tracker ../rtl/pnl_tracker.v ../tb/pnl_tracker_tb.v
+run book_cursor ../rtl/prio_enc64.v ../rtl/book_cursor.v ../tb/book_cursor_tb.v
+iverilog -g2005 -Wno-timescale -o "$BUILD/dashboard.vvp" ../rtl/font_rom.v ../rtl/bin2bcd.v \
+         ../rtl/dashboard.v ../tb/mocks/vga_adapter.v ../tb/dashboard_tb.v
+vvp -n "$BUILD/dashboard.vvp" | grep -v -E 'WARNING|\$finish'
+python3 ../python/check_dashboard.py out
 run hft_top   ../rtl/market_rom.v ../rtl/feed_handler.v ../rtl/prio_enc64.v ../rtl/order_book.v \
-              ../rtl/seg7.v ../rtl/sync2.v ../rtl/strategy.v ../rtl/risk_gate.v ../rtl/dashboard.v \
+              ../rtl/seg7.v ../rtl/sync2.v ../rtl/strategy.v ../rtl/risk_gate.v ../rtl/pnl_tracker.v \
+              ../rtl/font_rom.v ../rtl/bin2bcd.v ../rtl/dashboard.v \
+              ../rtl/order_arbiter.v ../rtl/matching_engine.v ../rtl/ps2_rx.v ../rtl/kb_decoder.v \
+              ../rtl/bin2bcd_comb.v ../rtl/order_entry.v ../rtl/book_cursor.v \
               ../rtl/hft_top.v ../tb/mocks/vga_adapter.v ../tb/hft_top_tb.v
 python3 ../python/e2e.py ../mem/market_data.hex out

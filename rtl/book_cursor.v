@@ -1,5 +1,7 @@
 // book_cursor.v  (Pierce, M2)
 // Price-level cursor for the VGA ladder, moved with the PS/2 arrow keys.
+// After reset it is OFF (no white bar, readout "--- -- QTY 0000") and sits at START, the
+// middle of the ladder. The first arrow that lands on a bar turns it on, moving from START.
 //   Up    : next level ABOVE the cursor that has a bar (bid or ask); stays if there is none
 //   Down  : next level BELOW the cursor that has a bar; stays if there is none
 //   Left  : jump to the best bid   (stays if there are no bids)
@@ -19,7 +21,8 @@ module book_cursor #(
     input             bid_valid,
     input      [5:0]  best_ask,
     input             ask_valid,
-    output reg [5:0]  cursor
+    output reg [5:0]  cursor,
+    output reg        active            // 0 from reset until the first arrow lands on a bar
 );
     localparam K_UP = 5'd18, K_DOWN = 5'd19, K_LEFT = 5'd20, K_RIGHT = 5'd21;
 
@@ -34,14 +37,15 @@ module book_cursor #(
     prio_enc64 #(.HIGHEST(1)) u_down (.in(below), .idx(down_idx), .valid(down_ok));
 
     always @(posedge clk) begin
-        if (!resetn)
+        if (!resetn) begin
             cursor <= START;
-        else if (key_valid)
+            active <= 1'b0;
+        end else if (key_valid)
             case (key_code)
-                K_UP:    if (up_ok)     cursor <= up_idx;
-                K_DOWN:  if (down_ok)   cursor <= down_idx;
-                K_LEFT:  if (bid_valid) cursor <= best_bid;
-                K_RIGHT: if (ask_valid) cursor <= best_ask;
+                K_UP:    if (up_ok)     begin cursor <= up_idx;   active <= 1'b1; end
+                K_DOWN:  if (down_ok)   begin cursor <= down_idx; active <= 1'b1; end
+                K_LEFT:  if (bid_valid) begin cursor <= best_bid; active <= 1'b1; end
+                K_RIGHT: if (ask_valid) begin cursor <= best_ask; active <= 1'b1; end
                 default: ;
             endcase
     end

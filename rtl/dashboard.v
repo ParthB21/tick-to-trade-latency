@@ -11,6 +11,8 @@
 //   arrow-key cursor   : the bar(s) on the cursor level are drawn white instead of green / red
 //   cursor readout     : top-right black box (x >= 226, rows 0..10) with one text line
 //                        "BID pp QTY qqqq" (green) / "ASK pp QTY qqqq" (red) / "--- pp QTY 0000"
+//                        (level emptied under the cursor); "--- -- QTY 0000" while the cursor
+//                        is off (reset until the first arrow key), and no white bar
 //
 // Text is drawn for a 16:9 monitor that stretches the 4:3 picture 4/3 wider: glyphs are
 // 5 pixels wide in 6-pixel cells and 9 rows tall (font rows 2 and 4 drawn twice), so after
@@ -67,6 +69,7 @@ module dashboard (
     input      [29:0] entry_disp,        // order entry display codes (seg7 codes, HEX5 first)
     input      [5:0]  reject,            // risk gate sticky reject flags
     input      [5:0]  cursor,            // arrow-key cursor level (book_cursor)
+    input             cursor_active,     // 0 = cursor off: no white bar, blank readout
 
     // to vga_adapter
     output reg [8:0]  x,
@@ -136,6 +139,7 @@ module dashboard (
     reg  [5:0]  f_cursor, cap_level;
     reg  [12:0] cap_bid, cap_ask;
     reg         d_is_bid, d_is_ask;
+    reg         f_cur_on, d_cur_on;      // this frame's cursor state / the readout's (previous frame)
 
     wire [9:0]  pos_mag   = position[9] ? -position : position;       // -512 -> 512 fits unsigned
     wire [23:0] pnl_abs   = pnl[23] ? -pnl : pnl;
@@ -335,10 +339,13 @@ module dashboard (
             7'd0: rglyph = d_is_bid ? G_B : d_is_ask ? G_A : G_MINUS;
             7'd1: rglyph = d_is_bid ? G_I : d_is_ask ? G_S : G_MINUS;
             7'd2: rglyph = d_is_bid ? G_D : d_is_ask ? G_K : G_MINUS;
-            7'd4: rglyph = dg(cl_bcd[7:4]);   7'd5: rglyph = dg(cl_bcd[3:0]);
+            7'd4: rglyph = d_cur_on ? dg(cl_bcd[7:4]) : G_MINUS;
+            7'd5: rglyph = d_cur_on ? dg(cl_bcd[3:0]) : G_MINUS;
             7'd7: rglyph = G_Q;  7'd8: rglyph = G_T;  7'd9: rglyph = G_Y;
-            7'd11: rglyph = dg(cq_bcd[15:12]); 7'd12: rglyph = dg(cq_bcd[11:8]);
-            7'd13: rglyph = dg(cq_bcd[7:4]);   7'd14: rglyph = dg(cq_bcd[3:0]);
+            7'd11: rglyph = d_cur_on ? dg(cq_bcd[15:12]) : 6'd0;
+            7'd12: rglyph = d_cur_on ? dg(cq_bcd[11:8])  : 6'd0;
+            7'd13: rglyph = d_cur_on ? dg(cq_bcd[7:4])   : 6'd0;
+            7'd14: rglyph = d_cur_on ? dg(cq_bcd[3:0])   : 6'd0;
             default: rglyph = G_SP;
         endcase
     end
@@ -358,7 +365,7 @@ module dashboard (
     end
     wire [2:0] read_colour = d_is_bid ? GREEN : d_is_ask ? RED : WHITE;
     wire       in_box      = (x >= BOX_X) && (y <= BOX_LAST_Y);
-    wire       on_cursor   = (level == f_cursor);
+    wire       on_cursor   = f_cur_on && (level == f_cursor);
 
     function [7:0] bar_len(input [12:0] qty);
         reg [7:0] scaled;
@@ -399,7 +406,7 @@ module dashboard (
             f_book_bid <= 1'b0; f_book_ask <= 1'b0; f_skew <= 1'b0; f_has_fill <= 1'b0;
             f_fill_side <= 1'b0; f_keys <= {6{5'd10}}; f_reject <= 6'd0; f_size <= 4'd0;
             f_cursor <= 6'd0; cap_level <= 6'd0; cap_bid <= 13'd0; cap_ask <= 13'd0;
-            d_is_bid <= 1'b0; d_is_ask <= 1'b0;
+            d_is_bid <= 1'b0; d_is_ask <= 1'b0; f_cur_on <= 1'b0; d_cur_on <= 1'b0;
         end else begin
             case (state)
                 S_ADDR_BID: begin
@@ -413,8 +420,10 @@ module dashboard (
                         f_reject   <= reject;
                         f_size     <= (our_size > 8'd9) ? 4'd9 : our_size[3:0];
                         f_cursor   <= cursor;
-                        d_is_bid   <= (cap_bid != 13'd0);
-                        d_is_ask   <= (cap_bid == 13'd0) && (cap_ask != 13'd0);
+                        f_cur_on   <= cursor_active;
+                        d_cur_on   <= f_cur_on;
+                        d_is_bid   <= f_cur_on && (cap_bid != 13'd0);
+                        d_is_ask   <= f_cur_on && (cap_bid == 13'd0) && (cap_ask != 13'd0);
                     end
                     state <= S_ADDR_ASK;
                 end

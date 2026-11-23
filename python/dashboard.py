@@ -32,7 +32,8 @@ IDLE_KEYS = [10] * 6                       # order entry with nothing typed: "--
 RISK_WORDS = [(20, "KILL"), (25, "SIDE"), (30, "SIZE"), (35, "LONG"), (40, "SHORT"), (46, "CROSS")]
 
 # arrow-key cursor (book_cursor.v): the bar(s) on its level are drawn white, and a
-# top-right readout box with one line "BID pp QTY qqqq" / "ASK pp QTY qqqq" / "--- pp QTY 0000"
+# top-right readout box with one line "BID pp QTY qqqq" / "ASK pp QTY qqqq" / "--- pp QTY 0000".
+# From reset until the first arrow key the cursor is off: no white bar, readout "--- -- QTY 0000".
 CURSOR_START = 32
 READ_X, READ_Y, BOX_X, BOX_LAST_Y = 230, 1, 226, 10
 
@@ -40,7 +41,7 @@ READ_X, READ_Y, BOX_X, BOX_LAST_Y = 230, 1, 226, 10
 def default_panel():
     return dict(best_bid=0, bid_valid=False, best_ask=0, ask_valid=False, msg_count=0, size=0,
                 skew=False, fill_count=0, fill_side=0, fill_px=0, fill_qty=0, keys=IDLE_KEYS, reject=0,
-                cursor=CURSOR_START)
+                cursor=CURSOR_START, cursor_active=False)
 
 
 def bar_len(qty):
@@ -112,8 +113,10 @@ def draw_text(frame, left, top, text, cols):
                     frame[top + r][x0 + c] = cols[i]
 
 
-def cursor_readout(qty, level):
+def cursor_readout(qty, level, active):
     """Text and colour of the top-right box for the cursor level."""
+    if not active:
+        return "--- -- QTY 0000", WHITE
     bid_q, ask_q = qty[BID][level], qty[ASK][level]
     if bid_q:
         return f"BID {level:02d} QTY {bid_q:04d}", GREEN
@@ -133,7 +136,7 @@ def render(qty, bid_live, bid_px, ask_live, ask_px, position, pnl, panel=None):
         top = (N_LEVELS - 1 - level) * ROW_H
         for y in range(top, top + ROW_H - 1):
             row = frame[y]
-            on_cursor = level == p["cursor"]
+            on_cursor = p["cursor_active"] and level == p["cursor"]
             for x in range(CENTRE - bid_l, CENTRE):
                 row[x] = WHITE if on_cursor else GREEN
             for x in range(CENTRE, CENTRE + ask_l):
@@ -144,7 +147,7 @@ def render(qty, bid_live, bid_px, ask_live, ask_px, position, pnl, panel=None):
                 row[ASK_MARK_X:ASK_MARK_X + MARK_W] = [YELLOW] * MARK_W
     for y in range(BOX_LAST_Y + 1):
         frame[y][BOX_X:WIDTH] = [BLACK] * (WIDTH - BOX_X)
-    text, colour = cursor_readout(qty, p["cursor"])
+    text, colour = cursor_readout(qty, p["cursor"], p["cursor_active"])
     draw_text(frame, READ_X, READ_Y, text, [colour] * len(text))
     lines, colours = text_lines(bid_live, bid_px, ask_live, ask_px, position, pnl, p)
     for k, (line, cols) in enumerate(zip(lines, colours)):

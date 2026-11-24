@@ -7,10 +7,13 @@ Uses Humor Sans if it is installed (as in M1), otherwise Comic Sans.
     arbiter_fsm.png       order arbiter FSM + collision policy
     entry_fsm.png         order entry FSM (keyboard)
     matching_datapath.png matching engine compare/fill datapath
-    m2_block.png          M2 system block diagram
+    m2_block.png          M2 system block diagram (with the arrow-key book cursor)
+    strategy_fsm.png      strategy FSM (IDLE -> CALC -> OUT)
+    dashboard_fsm.png     VGA dashboard FSM (ADDR_BID, ADDR_ASK, LATCH_ASK, DRAW, TEXT)
 """
 import os
 import matplotlib
+import matplotlib.patches
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch, Circle
@@ -155,23 +158,27 @@ def matching_datapath():
 
 
 def m2_block():
-    fig, ax = canvas(13, 6.5)
-    ax.text(6.5, 6.15, "Milestone 2 system (blue = Parth, red = Pierce)", ha="center", fontsize=15, weight="bold")
-    box(ax, 1.3, 4.6, 2.0, 0.9, "market ROM", col=GREY)
-    box(ax, 1.3, 2.4, 2.0, 0.9, "PS/2 keyboard", col=GREY)
-    box(ax, 3.9, 4.6, 2.2, 0.9, "feed handler")
-    box(ax, 3.9, 2.4, 2.2, 1.1, "ps2_rx ->", "kb_decoder -> order_entry")
+    fig, ax = canvas(13, 7.0)
+    ax.text(6.5, 6.65, "Milestone 2 system (blue = Parth, red = Pierce)", ha="center", fontsize=15, weight="bold")
+    box(ax, 1.3, 4.6, 2.0, 0.9, "PS/2 keyboard", col=GREY)
+    box(ax, 1.3, 2.4, 2.0, 0.9, "market ROM", col=GREY)
+    box(ax, 3.9, 4.6, 2.2, 1.1, "ps2_rx ->", "kb_decoder -> order_entry")
+    box(ax, 3.9, 2.4, 2.2, 0.9, "feed handler")
     box(ax, 6.4, 3.5, 1.8, 1.0, "order", "arbiter")
     box(ax, 8.7, 3.5, 2.0, 1.0, "order book", "masks + RAM")
     box(ax, 11.2, 4.7, 2.0, 0.9, "strategy", col=RED)
     box(ax, 11.2, 3.3, 2.0, 0.9, "risk gate", col=RED)
     box(ax, 8.7, 1.5, 2.2, 0.9, "matching engine")
     box(ax, 11.2, 1.5, 2.0, 0.9, "P&L tracker", col=RED)
-    box(ax, 8.7, 5.4, 2.0, 0.7, "VGA dashboard", col=RED, fs=11)
+    box(ax, 8.9, 5.7, 2.0, 0.7, "VGA dashboard", col=RED, fs=11)
+    box(ax, 6.2, 5.7, 1.9, 0.8, "book cursor", "next non-empty bar", col=RED, fs=11)
     arrow(ax, 2.3, 4.6, 2.8, 4.6)
     arrow(ax, 2.3, 2.4, 2.8, 2.4)
-    arrow(ax, 5.0, 4.5, 5.5, 3.8)
+    arrow(ax, 5.0, 4.4, 5.5, 3.8, "orders", fs=9, lx=0.35, ly=0.15)
     arrow(ax, 5.0, 2.5, 5.5, 3.2)
+    arrow(ax, 4.6, 5.15, 5.25, 5.6, "up / down\narrows", fs=9, lx=-0.55, ly=0.3)
+    arrow(ax, 7.15, 5.7, 7.9, 5.7, "cursor", fs=9, ly=0.18)
+    arrow(ax, 8.1, 4.0, 6.7, 5.3, "masks", fs=9, lx=0.15, ly=-0.1, dashed=True, col=GREY)
     arrow(ax, 7.3, 3.5, 7.7, 3.5)
     arrow(ax, 9.7, 3.8, 10.2, 4.6, "done", fs=9, lx=-0.2)
     arrow(ax, 11.2, 4.25, 11.2, 3.75)
@@ -179,9 +186,56 @@ def m2_block():
     arrow(ax, 10.6, 2.85, 9.6, 1.9, "quotes", fs=9, lx=0.35, ly=0.15)
     arrow(ax, 9.8, 1.5, 10.2, 1.5, "fills", fs=9, ly=0.2)
     arrow(ax, 12.2, 1.9, 12.2, 2.9, "position", fs=9, lx=0.55, ly=0, dashed=True)
-    arrow(ax, 8.7, 4.0, 8.7, 5.05)
-    ax.text(3.9, 0.9, "HEX views: bot, market, depth, entry, fills  (KEY[2])", fontsize=10, ha="center", color=GREY)
+    arrow(ax, 8.9, 4.0, 8.9, 5.35)
+    ax.text(3.9, 0.9, "HEX views: bot, market, bid/ask depth, entry, fills  (KEY[2])", fontsize=10, ha="center",
+            color=GREY)
     save(fig, "m2_block.png")
+
+
+def strategy_fsm():
+    fig, ax = canvas(8, 6.2)
+    ax.text(4, 5.8, "Strategy FSM (rtl/strategy.v)", ha="center", fontsize=15, weight="bold")
+    state(ax, 4, 4.3, "IDLE", "wait for trigger", col=RED)
+    state(ax, 6.2, 1.6, "CALC", "register quote", col=RED)
+    state(ax, 1.8, 1.6, "OUT", "quote_valid = 1", col=RED)
+    arrow(ax, 4.45, 3.85, 5.85, 2.05, "trigger (book done):\nsnapshot bid, ask, hs,\nsize, position, skew_k",
+          lx=1.6, ly=0.35, fs=9)
+    arrow(ax, 5.65, 1.6, 2.35, 1.6, "always", ly=0.2, fs=10)
+    arrow(ax, 2.15, 2.05, 3.55, 3.85, "always", lx=-0.6, ly=0.1, fs=10)
+    ax.add_patch(matplotlib.patches.FancyArrowPatch((3.62, 4.75), (4.38, 4.75), connectionstyle="arc3,rad=-1.4",
+                                                    arrowstyle="-|>", mutation_scale=12, lw=1.4, color=INK))
+    ax.text(4, 5.35, "no trigger", ha="center", fontsize=9)
+    ax.text(4, 0.45, "quote_valid 2 cycles after trigger; quote_ok = both sides valid and bid < ask",
+            ha="center", fontsize=9.5, color=GREY)
+    save(fig, "strategy_fsm.png")
+
+
+def dashboard_fsm():
+    fig, ax = canvas(11, 7.2)
+    ax.text(5.5, 6.85, "VGA dashboard FSM (rtl/dashboard.v)", ha="center", fontsize=15, weight="bold")
+    r = 0.7
+    state(ax, 1.6, 4.6, "ADDR_BID", "address bid qty", r=r, col=RED)
+    state(ax, 4.4, 4.6, "ADDR_ASK", "bid bar length", r=r, col=RED)
+    state(ax, 7.2, 4.6, "LATCH_ASK", "ask bar length", r=r, col=RED)
+    state(ax, 7.2, 1.7, "DRAW", "plot = 1", r=r, col=RED)
+    state(ax, 2.6, 1.7, "TEXT", "plot = 1", r=r, col=RED)
+    arrow(ax, 2.3, 4.6, 3.7, 4.6, "always", ly=0.2, fs=9.5)
+    arrow(ax, 5.1, 4.6, 6.5, 4.6, "always", ly=0.2, fs=9.5)
+    arrow(ax, 7.2, 3.9, 7.2, 2.4, "always", lx=0.45, ly=0, fs=9.5)
+    arrow(ax, 6.6, 2.15, 2.1, 4.05, "", fs=9.5)
+    ax.text(5.0, 3.55, "x = 319, dy = 2, level != 0\n(next level: level - 1)", fontsize=9.5, ha="center")
+    arrow(ax, 6.5, 1.6, 3.3, 1.6, "x = 319, dy = 2, level = 0", ly=-0.25, fs=9.5)
+    arrow(ax, 2.0, 2.15, 1.35, 3.95, "x = 319, y = 239\n(frame done)", lx=-0.75, ly=0, fs=9.5)
+    ax.add_patch(matplotlib.patches.FancyArrowPatch((7.75, 1.25), (7.75, 2.15), connectionstyle="arc3,rad=1.6",
+                                                    arrowstyle="-|>", mutation_scale=12, lw=1.4, color=INK))
+    ax.text(9.35, 1.7, "else: next pixel\n(3 rows x 320 px\nper level)", fontsize=9.5, ha="center")
+    ax.add_patch(matplotlib.patches.FancyArrowPatch((2.05, 1.25), (2.05, 2.15), connectionstyle="arc3,rad=-1.6",
+                                                    arrowstyle="-|>", mutation_scale=12, lw=1.4, color=INK))
+    ax.text(0.75, 0.9, "else: next pixel\n(48 rows x 320 px)", fontsize=9.5, ha="center")
+    ax.text(1.6, 5.75, "at level 63: latch frame values,\nstart bin2bcd", fontsize=9, ha="center", color=GREY)
+    ax.text(5.5, 0.35, "reset -> ADDR_BID.  Per frame: 64 x (3 + 960) + 15,360 = 76,992 cycles = 1.54 ms",
+            fontsize=9.5, ha="center", color=GREY)
+    save(fig, "dashboard_fsm.png")
 
 
 if __name__ == "__main__":
@@ -192,3 +246,5 @@ if __name__ == "__main__":
         entry_fsm()
         matching_datapath()
         m2_block()
+        strategy_fsm()
+        dashboard_fsm()

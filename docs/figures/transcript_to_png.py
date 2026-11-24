@@ -79,6 +79,11 @@ if __name__ == "__main__":
         "fig21_strategy_tests.png": [
             ("python ../python/gen_vectors.py", clip(lg("gen_vectors"), "strategy", "pnl tracker")),
             (VS.format("strategy_tb"), clip(lg("strategy"), grep=["PASS", "FAIL", "MISMATCH"]))],
+        "fig16_risk_gate_tests.png": [
+            ("python ../python/gen_vectors.py", clip(lg("gen_vectors"), "strategy", "pnl tracker")),
+            (VS.format("risk_gate_tb"), clip(lg("risk"), grep=["PASS", "FAIL", "MISMATCH"]))],
+        "fig23_book_cursor_tests.png": [
+            (VS.format("book_cursor_tb"), clip(lg("cursor"), grep=["PASS", "FAIL"]))],
         "fig24_e2e.png": [
             (VS.format("hft_top_tb"), clip(lg("hft_top"), "replay done", "PASS")),
             ("python ../python/e2e.py ../mem/market_data.hex out", clip(lg("e2e"), "orders:", "PASS"))],

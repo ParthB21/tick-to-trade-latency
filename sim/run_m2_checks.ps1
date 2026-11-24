@@ -26,7 +26,8 @@ $rtl = "../rtl/market_rom.v","../rtl/feed_handler.v","../rtl/prio_enc64.v","../r
        "../rtl/sync2.v","../rtl/strategy.v","../rtl/risk_gate.v","../rtl/pnl_tracker.v",
        "../rtl/font_rom.v","../rtl/bin2bcd.v","../rtl/dashboard.v",
        "../rtl/order_arbiter.v","../rtl/matching_engine.v","../rtl/ps2_rx.v","../rtl/kb_decoder.v",
-       "../rtl/bin2bcd_comb.v","../rtl/order_entry.v","../rtl/hft_top.v","../tb/mocks/vga_adapter.v"
+       "../rtl/bin2bcd_comb.v","../rtl/order_entry.v","../rtl/book_cursor.v","../rtl/hft_top.v",
+       "../tb/mocks/vga_adapter.v"
 
 # ---- Pierce's blocks ----
 Run-Sim "strategy (Pierce)" @("../rtl/strategy.v","../tb/strategy_tb.v") "work.strategy_tb" @()
@@ -34,6 +35,7 @@ Run-Sim "risk gate (Pierce)" @("../rtl/risk_gate.v","../tb/risk_gate_tb.v") "wor
 Run-Sim "P&L tracker (Pierce)" @("../rtl/pnl_tracker.v","../tb/pnl_tracker_tb.v") "work.pnl_tracker_tb" @()
 Run-Sim "dashboard (Pierce)" @("../rtl/font_rom.v","../rtl/bin2bcd.v","../rtl/dashboard.v","../tb/mocks/vga_adapter.v","../tb/dashboard_tb.v") "work.dashboard_tb" @()
 python ../python/check_dashboard.py out
+Run-Sim "book cursor (Pierce)" @("../rtl/prio_enc64.v","../rtl/book_cursor.v","../tb/book_cursor_tb.v") "work.book_cursor_tb" @()
 
 # ---- Parth's blocks ----
 
